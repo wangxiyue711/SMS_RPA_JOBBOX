@@ -1,0 +1,54 @@
+{
+  "accounts": [
+    {
+      "account_name": "りくらぼ株式会社",
+      "jobbox_id": "rec-lab-saiyo@getmail.recruitjp.click",
+      "jobbox_password": "kbxsaiyo3823"
+    },
+    {
+      "account_name": "りくらぼ株式会社 人事部",
+      "jobbox_id": "rec-lab@getmail.recruitjp.click",
+      "jobbox_password": "kbxsaiyo3775"
+    },
+    {
+      "account_name": "りくらぼ株式会社 東京本社",
+      "jobbox_id": "rec-lab-tokyo@getmail.recruitjp.click",
+      "jobbox_password": "kbxsaiyo3776"
+    },
+    {
+      "account_name": "りくらぼ株式会社 紹介事業部",
+      "jobbox_id": "rec-lab.shokai@getmail.recruitjp.click",
+      "jobbox_password": "kbxsaiyo3923"
+    },
+    {
+      "account_name": "りくらぼ株式会社 本社",
+      "jobbox_id": "rec-lab.honsha@getmail.recruitjp.click",
+      "jobbox_password": "kbxsaiyo3924"
+    },
+    {
+      "account_name": "りくらぼ株式会社 採用窓口",
+      "jobbox_id": "rec-lab.saiyo@getmail.recruitjp.click",
+      "jobbox_password": "kbxsaiyo3925"
+    },
+    {
+      "account_name": "りくらぼ株式会社 採用人事部",
+      "jobbox_id": "reclab-saiyo@getmail.recruitjp.click",
+      "jobbox_password": "kbxsaiyo4359"
+    },
+    {
+      "account_name": "りくらぼ株式会社 人材紹介事業部",
+      "jobbox_id": "reclab-jinzai@getmail.recruitjp.click",
+      "jobbox_password": "kbxsaiyo4360"
+    },
+    {
+      "account_name": "りくらぼ株式会社 採用本部",
+      "jobbox_id": "reclab-s@getmail.recruitjp.click",
+      "jobbox_password": "kbxsaiyo4361"
+    },
+    {
+      "account_name": "りくらぼ株式会社 採用事務局",
+      "jobbox_id": "reclab-sai@getmail.recruitjp.click",
+      "jobbox_password": "kbxsaiyo4362"
+    }
+  ]
+}
