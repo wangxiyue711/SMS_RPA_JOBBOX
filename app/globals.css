@@ -1,3 +1,48 @@
+.sidebar-home-link {
+  transition: background 0.2s, color 0.2s;
+  padding: 4px 12px;
+  border-radius: 6px;
+  color: var(--shade-2);
+  display: inline-block;
+}
+.sidebar-home-link:hover {
+  background: var(--shade-4);
+  color: var(--shade-1);
+  cursor: pointer;
+}
+.sidebar-home-link.active {
+  background: var(--shade-2);
+  color: #fff;
+}
+.sidebar ul {
+  transition: max-height 0.2s, opacity 0.2s;
+  overflow: hidden;
+}
+.sidebar svg {
+  transition: stroke 0.2s;
+}
+.sidebar li:hover svg circle {
+  stroke: var(--accent);
+}
+.sidebar li:hover svg path {
+  stroke: var(--accent);
+}
+/* Sidebar HOME link styles */
+.sidebar-home-link {
+  transition: background 0.2s, color 0.2s;
+  padding: 4px 12px;
+  border-radius: 6px;
+  color: var(--shade-2);
+}
+.sidebar-home-link:hover {
+  background: var(--shade-4);
+  color: var(--shade-1);
+  cursor: pointer;
+}
+.sidebar-home-link.active {
+  background: var(--shade-2);
+  color: #fff;
+}
 :root {
   /* Grayscale palette provided */
   --shade-1: #000000;
