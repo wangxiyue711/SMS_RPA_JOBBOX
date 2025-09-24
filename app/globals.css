@@ -1,3 +1,48 @@
+.sidebar-home-link {
+  transition: background 0.2s, color 0.2s;
+  padding: 4px 12px;
+  border-radius: 6px;
+  color: var(--shade-2);
+  display: inline-block;
+}
+.sidebar-home-link:hover {
+  background: var(--shade-4);
+  color: var(--shade-1);
+  cursor: pointer;
+}
+.sidebar ul {
+  transition: max-height 0.2s, opacity 0.2s;
+  overflow: hidden;
+}
+.sidebar svg {
+  transition: stroke 0.2s;
+}
+.sidebar li:hover svg circle {
+  stroke: var(--accent);
+}
+.sidebar li:hover svg path {
+  stroke: var(--accent);
+}
+/* Sidebar HOME link styles */
+.sidebar-home-link {
+  transition: background 0.2s, color 0.2s;
+  padding: 4px 12px;
+  border-radius: 6px;
+  color: var(--shade-2);
+}
+.sidebar-home-link:hover {
+  background: var(--shade-4);
+  color: var(--shade-1);
+  cursor: pointer;
+}
+.sidebar {
+  min-width: 220px;
+  max-width: 260px;
+}
+.sidebar-home-link.active {
+  background: var(--shade-2);
+  color: #fff;
+}
 :root {
   /* Grayscale palette provided */
   --shade-1: #000000;
@@ -28,6 +73,23 @@ body {
     rgba(240, 240, 240, 1) 100%
   );
   color: var(--text);
+}
+
+/* Ensure content fills behind header and no visual seam */
+.content-wrap {
+  background: transparent;
+  min-height: calc(100vh - 64px);
+  padding: 24px;
+}
+
+main {
+  min-height: calc(100vh - 64px - 48px);
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
 }
 
 .center {
@@ -180,6 +242,74 @@ body {
   padding: 16px;
   border: 1px solid rgba(48, 48, 48, 0.04);
   height: fit-content;
+}
+.app-header {
+  background: linear-gradient(90deg, var(--shade-1), #111111);
+  color: #fff;
+  padding: 12px 20px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #222;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #fff;
+}
+.brand-name {
+  font-weight: 700;
+  font-size: 16px;
+}
+.user-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 6px 10px;
+  border-radius: 10px;
+}
+.user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+.user-info {
+  display: flex;
+  flex-direction: column;
+}
+.user-email {
+  font-weight: 700;
+  font-size: 13px;
+}
+.user-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
 }
 .main {
   min-height: 200px;

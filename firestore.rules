@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { return isSignedIn() && request.auth.token.admin == true; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+
+    // allow users to manage their own Jobbox accounts
+    match /accounts/{userId}/jobbox_accounts/{docId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if (isOwner(userId) || isAdmin()) && validAccount(request.resource.data);
+      allow update: if (isOwner(userId) || isAdmin()) && validAccount(request.resource.data);
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // other known paths: you can add other match blocks here (user configs, profiles, etc.)
+
+    // default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function validAccount(data) {
+      return data.keys().hasOnly(['account_name','jobbox_id','jobbox_password'])
+        && data.account_name is string && data.account_name.size() > 0 && data.account_name.size() <= 120
+        && data.jobbox_id is string && data.jobbox_id.size() > 0 && data.jobbox_id.size() <= 200
+        && data.jobbox_password is string && data.jobbox_password.size() >= 6 && data.jobbox_password.size() <= 200;
+    }
+  }
+}
