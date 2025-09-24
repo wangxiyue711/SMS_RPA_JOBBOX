@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import { auth } from "../../lib/firebaseClient";
+import { getClientAuth } from "../../lib/firebaseClient";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,7 +23,9 @@ export default function LoginPage() {
     setMessage("");
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const clientAuth = getClientAuth();
+      if (!clientAuth) throw new Error("Client auth unavailable");
+      await signInWithEmailAndPassword(clientAuth, email, password);
       setMessage("ログインに成功しました。");
       // redirect to dashboard after successful login
       router.push("/dashboard");
@@ -48,7 +50,9 @@ export default function LoginPage() {
     setShowModal(false);
     setLoading(true);
     try {
-      await sendPasswordResetEmail(auth, email);
+      const clientAuth = getClientAuth();
+      if (!clientAuth) throw new Error("Client auth unavailable");
+      await sendPasswordResetEmail(clientAuth, email);
       setMessage(
         "パスワード再設定メールを送信しました。メールを確認してください。"
       );

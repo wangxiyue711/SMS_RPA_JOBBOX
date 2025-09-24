@@ -10,8 +10,16 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-if (!getApps().length) {
-  initializeApp(firebaseConfig);
+function initFirebaseClient() {
+  if (typeof window === "undefined") return;
+  if (!getApps().length) {
+    initializeApp(firebaseConfig);
+  }
 }
 
-export const auth = getAuth();
+// Return the client-side Auth instance or null on server
+export function getClientAuth() {
+  if (typeof window === "undefined") return null;
+  initFirebaseClient();
+  return getAuth();
+}
