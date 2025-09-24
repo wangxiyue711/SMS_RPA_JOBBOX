@@ -100,6 +100,24 @@ export default function Sidebar({
               </a>
             </Link>
           </li>
+          <li style={{ listStyle: "none", marginBottom: 6 }}>
+            <Link href="/mail-settings" passHref legacyBehavior>
+              <a
+                className="sidebar-home-link"
+                style={{
+                  fontSize: 18,
+                  fontWeight: 500,
+                  textDecoration: "none",
+                  color: "inherit",
+                  padding: "2px 10px",
+                  borderRadius: "6px",
+                  display: "block",
+                }}
+              >
+                2.メール設定
+              </a>
+            </Link>
+          </li>
         </ul>
       )}
     </aside>
