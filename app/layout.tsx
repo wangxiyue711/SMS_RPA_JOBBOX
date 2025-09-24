@@ -1,14 +1,28 @@
-import './globals.css';
+import "./globals.css";
 
 export const metadata = {
-  title: 'RPA_JOBBOX',
-  description: 'Login page with Firebase auth',
-}
+  title: "RPA_JOBBOX",
+  description: "Login page with Firebase auth",
+};
 
-export default function RootLayout({ children, }: { children: React.ReactNode }) {
+import React from "react";
+import Sidebar from "./components/Sidebar";
+import Header from "./components/Header";
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="ja">
-      <body>{children}</body>
+      <body>
+        <Header />
+        <div style={{ display: "flex" }}>
+          <Sidebar heading="HOME" />
+          <main style={{ flex: 1 }}>{children}</main>
+        </div>
+      </body>
     </html>
-  )
+  );
 }

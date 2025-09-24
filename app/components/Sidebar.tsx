@@ -27,22 +27,20 @@ export default function Sidebar({
       {/* HOME 链接，左对齐 */}
       <div style={{ marginBottom: 12, display: "flex", alignItems: "center" }}>
         <Link href="/dashboard" passHref legacyBehavior>
-          <a
-            className={`sidebar-home-link${
-              pathname === "/dashboard" ? " active" : ""
-            }`}
-            style={{
-              fontSize: 22,
-              fontWeight: 700,
-              margin: 0,
-              textDecoration: "none",
-              color: "inherit",
-              cursor: "pointer",
-              paddingLeft: 0,
-            }}
-          >
-            HOME
-          </a>
+            <a
+              className="sidebar-home-link"
+              style={{
+                fontSize: 22,
+                fontWeight: 700,
+                margin: 0,
+                textDecoration: "none",
+                color: "inherit",
+                cursor: "pointer",
+                paddingLeft: 0,
+              }}
+            >
+              HOME
+            </a>
         </Link>
       </div>
 
@@ -84,6 +82,13 @@ export default function Sidebar({
       {menuOpen && (
         <ul style={{ paddingLeft: 0, margin: 0, transition: "all 0.2s" }}>
           {/* 菜单子项留空，后续可补充 */}
+          <li style={{ listStyle: "none", marginBottom: 6 }}>
+            <Link href="/rpa-settings" passHref legacyBehavior>
+              <a className="sidebar-home-link" style={{ fontSize: 18, fontWeight: 500, textDecoration: "none", color: "inherit", padding: "2px 10px", borderRadius: "6px", display: "block" }}>
+                RPA設定
+              </a>
+            </Link>
+          </li>
         </ul>
       )}
     </aside>
