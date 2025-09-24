@@ -27,6 +27,8 @@ export default function RPASettingsPage() {
   const [saved, setSaved] = useState<Array<any>>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const addRow = () =>
     setRows((r) => [
@@ -122,6 +124,7 @@ export default function RPASettingsPage() {
       setRows([{ account_name: "", jobbox_id: "", jobbox_password: "" }]);
       await loadSaved();
       setSuccess("保存しました");
+      setTimeout(() => setSuccess(""), 3000);
     } catch (err: any) {
       console.error("save error", err);
       const code = err && err.code ? err.code : "";
@@ -372,6 +375,12 @@ export default function RPASettingsPage() {
                       background: "transparent",
                       cursor: "pointer",
                       padding: 6,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 32,
+                      height: 32,
+                      lineHeight: 0,
                     }}
                   >
                     {s.jobbox_password_hidden ? (
@@ -379,6 +388,7 @@ export default function RPASettingsPage() {
                         xmlns="http://www.w3.org/2000/svg"
                         width="18"
                         height="18"
+                        style={{ display: "block" }}
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
@@ -395,6 +405,7 @@ export default function RPASettingsPage() {
                         xmlns="http://www.w3.org/2000/svg"
                         width="18"
                         height="18"
+                        style={{ display: "block" }}
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
@@ -412,23 +423,124 @@ export default function RPASettingsPage() {
 
                 <div>
                   <button
-                    onClick={() => handleDelete(s.id)}
+                    onClick={() => {
+                      setConfirmId(s.id);
+                      setConfirmOpen(true);
+                    }}
+                    aria-label="削除"
                     style={{
-                      background: "#e74c3c",
-                      color: "#fff",
                       border: "none",
-                      padding: "6px 10px",
-                      borderRadius: 6,
+                      background: "transparent",
                       cursor: "pointer",
+                      padding: 6,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--shade-1)",
+                      width: 32,
+                      height: 32,
+                      lineHeight: 0,
                     }}
                   >
-                    削除
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      style={{ display: "block" }}
+                    >
+                      <path
+                        d="M18 6L6 18"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M6 6L18 18"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
                   </button>
                 </div>
               </div>
             </li>
           ))}
         </ul>
+      )}
+      {success && (
+        <div
+          className="msg"
+          style={{ color: "var(--accent)", marginTop: 12, fontWeight: 700 }}
+        >
+          {success}
+        </div>
+      )}
+      {confirmOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.4)",
+            zIndex: 9999,
+          }}
+          onClick={() => {
+            setConfirmOpen(false);
+            setConfirmId(null);
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg, #0b0b0b)",
+              padding: 18,
+              borderRadius: 8,
+              minWidth: 320,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+            }}
+          >
+            <div style={{ marginBottom: 12, fontWeight: 700 }}>確認</div>
+            <div style={{ marginBottom: 18 }}>
+              このアカウントを削除してもよろしいですか？
+            </div>
+            <div
+              style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}
+            >
+              <button
+                onClick={() => {
+                  setConfirmOpen(false);
+                  setConfirmId(null);
+                }}
+                style={{ padding: "8px 12px" }}
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={async () => {
+                  if (confirmId) await handleDelete(confirmId);
+                  setConfirmOpen(false);
+                  setConfirmId(null);
+                }}
+                className="btn"
+                style={{ padding: "8px 12px" }}
+              >
+                削除
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
