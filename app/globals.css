@@ -75,6 +75,23 @@ body {
   color: var(--text);
 }
 
+/* Ensure content fills behind header and no visual seam */
+.content-wrap {
+  background: transparent;
+  min-height: calc(100vh - 64px);
+  padding: 24px;
+}
+
+main {
+  min-height: calc(100vh - 64px - 48px);
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
 .center {
   display: flex;
   min-height: 100vh;

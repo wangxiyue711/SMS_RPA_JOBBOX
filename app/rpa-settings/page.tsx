@@ -147,10 +147,10 @@ export default function RPASettingsPage() {
   return (
     <div style={{ padding: 28 }}>
       <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>
-        RPA設定
+        アカウント設定
       </h2>
       <p style={{ marginBottom: 16 }}>
-        ここでRPAに使用するJobboxアカウントを追加できます。保存後、RPA実行時にクラウドから読み込みます。
+        RPAに使用する求人ボックスアカウントを追加できます。保存後、RPA実行時にクラウドから読み込みます。
       </p>
 
       <form onSubmit={handleSave}>
@@ -289,107 +289,147 @@ export default function RPASettingsPage() {
       </form>
 
       <h3 style={{ marginTop: 28, marginBottom: 12 }}>保存済みアカウント</h3>
-      <div>
-        {saved.length === 0 && <div>アカウントはまだ保存されていません。</div>}
-        {saved.map((s, i) => (
-          <div
-            key={s.id}
-            style={{
-              background: "#fff",
-              padding: 12,
-              borderRadius: 8,
-              marginBottom: 8,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 700 }}>{s.account_name}</div>
-              <div style={{ color: "#666" }}>{s.jobbox_id}</div>
-              <div
-                style={{
-                  marginTop: 6,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                <span style={{ marginRight: 8 }}>パスワード: </span>
-                <span style={{ fontFamily: "monospace", marginRight: 8 }}>
-                  {s.jobbox_password_hidden ? "●●●●●●" : s.jobbox_password}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSaved((prev) =>
-                      prev.map((it, idx) =>
-                        idx === i
-                          ? {
-                              ...it,
-                              jobbox_password_hidden:
-                                !it.jobbox_password_hidden,
-                            }
-                          : it
-                      )
-                    );
-                  }}
-                  aria-label={s.jobbox_password_hidden ? "表示" : "隠す"}
+      {saved.length === 0 ? (
+        <div>アカウントはまだ保存されていません。</div>
+      ) : (
+        <ul
+          style={{
+            listStyle: "none",
+            padding: 0,
+            margin: 0,
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          {saved.map((s, i) => (
+            <li
+              key={s.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                padding: 12,
+                borderRadius: 8,
+              }}
+            >
+              <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                <div
                   style={{
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                    padding: 6,
+                    fontWeight: 700,
+                    color: "var(--text, #fff)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
                   }}
                 >
-                  {s.jobbox_password_hidden ? (
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden
-                    >
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </svg>
-                  ) : (
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden
-                    >
-                      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-5 0-9.27-3-11-7 1.11-2.45 2.98-4.44 5.23-5.66" />
-                      <path d="M1 1l22 22" />
-                    </svg>
-                  )}
-                </button>
+                  {s.account_name}
+                </div>
+                <div
+                  style={{
+                    color: "var(--muted, #aaa)",
+                    fontSize: 13,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {s.jobbox_id}
+                </div>
               </div>
-            </div>
-            <div>
-              <button
-                onClick={() => handleDelete(s.id)}
-                className="btn"
-                style={{ background: "#ddd", color: "#111" }}
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  marginLeft: 12,
+                }}
               >
-                削除
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontFamily: "monospace" }}>
+                    {s.jobbox_password_hidden ? "●●●●●●" : s.jobbox_password}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSaved((prev) =>
+                        prev.map((it, idx) =>
+                          idx === i
+                            ? {
+                                ...it,
+                                jobbox_password_hidden:
+                                  !it.jobbox_password_hidden,
+                              }
+                            : it
+                        )
+                      )
+                    }
+                    aria-label={s.jobbox_password_hidden ? "表示" : "隠す"}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                      padding: 6,
+                    }}
+                  >
+                    {s.jobbox_password_hidden ? (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    ) : (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-5 0-9.27-3-11-7 1.11-2.45 2.98-4.44 5.23-5.66" />
+                        <path d="M1 1l22 22" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+
+                <div>
+                  <button
+                    onClick={() => handleDelete(s.id)}
+                    style={{
+                      background: "#e74c3c",
+                      color: "#fff",
+                      border: "none",
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                    }}
+                  >
+                    削除
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

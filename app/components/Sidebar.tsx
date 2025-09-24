@@ -27,20 +27,20 @@ export default function Sidebar({
       {/* HOME 链接，左对齐 */}
       <div style={{ marginBottom: 12, display: "flex", alignItems: "center" }}>
         <Link href="/dashboard" passHref legacyBehavior>
-            <a
-              className="sidebar-home-link"
-              style={{
-                fontSize: 22,
-                fontWeight: 700,
-                margin: 0,
-                textDecoration: "none",
-                color: "inherit",
-                cursor: "pointer",
-                paddingLeft: 0,
-              }}
-            >
-              HOME
-            </a>
+          <a
+            className="sidebar-home-link"
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              margin: 0,
+              textDecoration: "none",
+              color: "inherit",
+              cursor: "pointer",
+              paddingLeft: 0,
+            }}
+          >
+            HOME
+          </a>
         </Link>
       </div>
 
@@ -62,7 +62,7 @@ export default function Sidebar({
           style={{
             marginLeft: 6,
             transition: "transform 0.2s",
-            transform: menuOpen ? "rotate(90deg)" : "rotate(0deg)",
+            transform: menuOpen ? "rotate(0deg)" : "rotate(90deg)",
           }}
         >
           {/* 高级下拉箭头 icon */}
@@ -84,8 +84,19 @@ export default function Sidebar({
           {/* 菜单子项留空，后续可补充 */}
           <li style={{ listStyle: "none", marginBottom: 6 }}>
             <Link href="/rpa-settings" passHref legacyBehavior>
-              <a className="sidebar-home-link" style={{ fontSize: 18, fontWeight: 500, textDecoration: "none", color: "inherit", padding: "2px 10px", borderRadius: "6px", display: "block" }}>
-                RPA設定
+              <a
+                className="sidebar-home-link"
+                style={{
+                  fontSize: 18,
+                  fontWeight: 500,
+                  textDecoration: "none",
+                  color: "inherit",
+                  padding: "2px 10px",
+                  borderRadius: "6px",
+                  display: "block",
+                }}
+              >
+                1.アカウント設定
               </a>
             </Link>
           </li>

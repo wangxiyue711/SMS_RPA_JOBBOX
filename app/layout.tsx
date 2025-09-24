@@ -18,9 +18,11 @@ export default function RootLayout({
     <html lang="ja">
       <body>
         <Header />
-        <div style={{ display: "flex" }}>
-          <Sidebar heading="HOME" />
-          <main style={{ flex: 1 }}>{children}</main>
+        <div className="content-wrap">
+          <div className="dashboard">
+            <Sidebar heading="HOME" />
+            <main>{children}</main>
+          </div>
         </div>
       </body>
     </html>
