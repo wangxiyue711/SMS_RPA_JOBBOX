@@ -118,6 +118,42 @@ export default function Sidebar({
               </a>
             </Link>
           </li>
+          <li style={{ listStyle: "none", marginBottom: 6 }}>
+            <Link href="/target-settings" passHref legacyBehavior>
+              <a
+                className="sidebar-home-link"
+                style={{
+                  fontSize: 18,
+                  fontWeight: 500,
+                  textDecoration: "none",
+                  color: "inherit",
+                  padding: "2px 10px",
+                  borderRadius: "6px",
+                  display: "block",
+                }}
+              >
+                3.対象設定
+              </a>
+            </Link>
+          </li>
+          <li style={{ listStyle: "none", marginBottom: 6 }}>
+            <Link href="/api-settings" passHref legacyBehavior>
+              <a
+                className="sidebar-home-link"
+                style={{
+                  fontSize: 18,
+                  fontWeight: 500,
+                  textDecoration: "none",
+                  color: "inherit",
+                  padding: "2px 10px",
+                  borderRadius: "6px",
+                  display: "block",
+                }}
+              >
+                4.API設定
+              </a>
+            </Link>
+          </li>
         </ul>
       )}
     </aside>

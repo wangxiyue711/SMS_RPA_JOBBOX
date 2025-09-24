@@ -14,12 +14,18 @@ function initFirebaseClient() {
   if (typeof window === "undefined") return;
   try {
     if (!getApps().length) {
+      // log config keys presence for diagnostics (do not log secrets)
+      const missing = Object.entries(firebaseConfig)
+        .filter(([k, v]) => !v)
+        .map(([k]) => k);
+      if (missing.length) {
+        console.warn("firebaseConfig missing keys:", missing);
+      }
       initializeApp(firebaseConfig);
     }
   } catch (err) {
     // swallow client init errors to avoid breaking hydration
-    // errors can be logged if needed
-    // console.error('initFirebaseClient error', err);
+    console.error("initFirebaseClient error", err);
   }
 }
 
@@ -28,10 +34,15 @@ export function getClientAuth() {
   if (typeof window === "undefined") return null;
   try {
     initFirebaseClient();
-    return getAuth();
+    const auth = getAuth();
+    if (!auth) {
+      console.warn("getAuth() returned falsy value");
+      return null;
+    }
+    return auth;
   } catch (err) {
     // prevent throwing during client mount
-    // console.error('getClientAuth error', err);
+    console.error("getClientAuth error", err);
     return null;
   }
 }

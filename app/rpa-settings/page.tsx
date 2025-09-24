@@ -156,7 +156,19 @@ export default function RPASettingsPage() {
         RPAに使用する求人ボックスアカウントを追加できます。保存後、RPA実行時にクラウドから読み込みます。
       </p>
 
-      <form onSubmit={handleSave}>
+      <form onSubmit={handleSave} autoComplete="off">
+        {/* Hidden fields to trap browser autofill (do not remove) */}
+        <div
+          style={{ position: "absolute", left: -9999, top: -9999, opacity: 0 }}
+          aria-hidden
+        >
+          <input name="fake-username" type="text" autoComplete="username" />
+          <input
+            name="fake-password"
+            type="password"
+            autoComplete="current-password"
+          />
+        </div>
         <table
           style={{ width: "100%", marginBottom: 12, tableLayout: "fixed" }}
         >
@@ -179,6 +191,8 @@ export default function RPASettingsPage() {
               <tr key={idx}>
                 <td>
                   <input
+                    name={`jobbox_account_name_${idx}`}
+                    autoComplete="off"
                     value={r.account_name}
                     onChange={(e) =>
                       updateRow(idx, "account_name", e.target.value)
@@ -189,6 +203,8 @@ export default function RPASettingsPage() {
                 </td>
                 <td>
                   <input
+                    name={`jobbox_id_${idx}`}
+                    autoComplete="off"
                     value={r.jobbox_id}
                     onChange={(e) =>
                       updateRow(idx, "jobbox_id", e.target.value)
@@ -200,6 +216,8 @@ export default function RPASettingsPage() {
                 <td>
                   <div style={{ position: "relative" }}>
                     <input
+                      name={`jobbox_password_${idx}`}
+                      autoComplete="new-password"
                       type={showPasswords[idx] ? "text" : "password"}
                       value={r.jobbox_password}
                       onChange={(e) =>

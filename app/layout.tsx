@@ -6,8 +6,7 @@ export const metadata = {
 };
 
 import React from "react";
-import Sidebar from "./components/Sidebar";
-import Header from "./components/Header";
+import ClientShell from "./components/ClientShell";
 
 export default function RootLayout({
   children,
@@ -17,13 +16,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body>
-        <Header />
-        <div className="content-wrap">
-          <div className="dashboard">
-            <Sidebar heading="HOME" />
-            <main>{children}</main>
-          </div>
-        </div>
+        <ClientShell>{children}</ClientShell>
       </body>
     </html>
   );

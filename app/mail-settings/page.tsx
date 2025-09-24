@@ -102,7 +102,19 @@ export default function MailSettingsPage() {
         メール監視用アカウントと16桁の専用パスワードを保存します。RPA実行時にクラウドから読み込みます。
       </p>
 
-      <form onSubmit={handleSave}>
+      <form onSubmit={handleSave} autoComplete="off">
+        {/* Hidden fields to trap browser autofill (do not remove) */}
+        <div
+          style={{ position: "absolute", left: -9999, top: -9999, opacity: 0 }}
+          aria-hidden
+        >
+          <input name="fake-username" type="text" autoComplete="username" />
+          <input
+            name="fake-password"
+            type="password"
+            autoComplete="current-password"
+          />
+        </div>
         <table
           style={{ width: "100%", marginBottom: 12, tableLayout: "fixed" }}
         >
@@ -115,6 +127,8 @@ export default function MailSettingsPage() {
               <td style={{ verticalAlign: "top" }}>
                 <label>監視メールアドレス</label>
                 <input
+                  name="mail_settings_email"
+                  autoComplete="off"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -125,6 +139,8 @@ export default function MailSettingsPage() {
                 <label>16桁の専用パスワード</label>
                 <div style={{ position: "relative" }}>
                   <input
+                    name="mail_settings_apppass"
+                    autoComplete="new-password"
                     type={showPass ? "text" : "password"}
                     value={appPass}
                     onChange={(e) => setAppPass(e.target.value)}
