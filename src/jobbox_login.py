@@ -333,7 +333,7 @@ return 'NOT_FOUND';
                 except: pass
             return ''
     
-        print("\n=== 应聘者情报 ===")
+        print("\n=== 応募者情报 ===")
         # 更精确的氏名定位：优先从表格的 th/td 标签后抓真实氏名，避免误取页面标题
         name = pick([
             "//th[normalize-space(.)='氏名']/following::td[1]",
@@ -521,7 +521,7 @@ return 'NOT_FOUND';
         if detail is None:
             _ = self._collect_and_check_detail(oubo_no_norm='')
             return
-        print("\n=== 应聘者情报 ===")
+        print("\n=== 応募者情报 ===")
         print(f"氏名: {detail.get('name','')}")
         print(f"性別: {detail.get('gender','')}")
         print(f"生年月日: {detail.get('birth','')}")
