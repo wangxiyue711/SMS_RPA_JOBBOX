@@ -28,6 +28,7 @@ export default function ApiSettingsPage() {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiId, setApiId] = useState("");
   const [apiPass, setApiPass] = useState("");
+  const [provider, setProvider] = useState("sms_publisher");
   const [showPass, setShowPass] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -47,6 +48,7 @@ export default function ApiSettingsPage() {
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         const data = snap.data() as any;
+        setProvider(data.provider || "sms_publisher");
         setBaseUrl(data.baseUrl || "");
         setApiId(data.apiId || "");
         setApiPass(data.apiPass || "");
@@ -69,7 +71,7 @@ export default function ApiSettingsPage() {
       const docRef = doc(db, "accounts", uid, "api_settings", "settings");
       await setDoc(
         docRef,
-        { baseUrl, apiId, apiPass, updatedAt: Date.now() },
+        { provider, baseUrl, apiId, apiPass, updatedAt: Date.now() },
         { merge: true }
       );
       setSaved(true);
@@ -84,9 +86,25 @@ export default function ApiSettingsPage() {
 
   return (
     <div style={{ padding: 28 }}>
-      <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>
-        API設定
-      </h2>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}
+      >
+        <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>API設定</h2>
+        <div>
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            style={{ padding: "6px 8px" }}
+          >
+            <option value="sms_publisher">SMS PUBLISHER</option>
+          </select>
+        </div>
+      </div>
       <p style={{ marginBottom: 16 }}>
         外部APIのベースURLとトークンを設定します。
       </p>

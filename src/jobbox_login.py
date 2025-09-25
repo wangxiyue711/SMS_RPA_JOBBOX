@@ -141,40 +141,21 @@ return 'NOT_FOUND';
                     return bool(self.driver.find_elements(By.CSS_SELECTOR, "iframe[src*='recaptcha'], .g-recaptcha, div.recaptcha"))
                 except: return False
             if not has_cap(): return
-            print('检测到验证码，请在浏览器完成后按回车继续（或等待自动消失）...')
+            print('キャプチャを検出しました。ブラウザで完了後、Enterキーを押すか自動で消えるのを待ってください...')
             while True:
                 if not has_cap(): 
-                    print('验证码完成。'); return
+                    print('キャプチャ完了。'); return
                 if time.time() - start > timeout:
-                    print('等待验证码超时，继续流程。'); return
+                    print('キャプチャの待機がタイムアウトしました。処理を続行します。'); return
                 time.sleep(1)
         except: return
 
     # ---------- 构造/登录/跳转 ----------
     def __init__(self, account_name):
-        if not os.path.exists(CONFIG_PATH):
-            raise FileNotFoundError(f"找不到配置文件: {CONFIG_PATH}")
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        requested = (account_name or '').strip()
-        self.account = None
-        # 精确/包含/account_id 三重匹配
-        for acc in data.get('accounts', []):
-            if (acc.get('account_name') or '').strip() == requested:
-                self.account = acc; break
-        if not self.account and requested:
-            for acc in data.get('accounts', []):
-                name = (acc.get('account_name') or '').strip()
-                if requested in name or name in requested:
-                    self.account = acc; break
-        if not self.account and requested:
-            for acc in data.get('accounts', []):
-                if acc.get('account_id') and requested == acc['account_id']:
-                    self.account = acc; break
-        if not self.account:
-            available = [(a.get('account_name') or '').strip() for a in data.get('accounts', [])]
-            raise Exception(f"未找到账号: '{account_name}'. 可用账号: {available}")
+        # 现在只支持直接传入 account 字典（来自 Firestore 的 jobbox_accounts 文档）
+        if not isinstance(account_name, dict):
+            raise Exception("Firestore の jobbox_accounts から取得")
+        self.account = account_name
 
         chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument('--window-size=1400,900')
@@ -221,8 +202,10 @@ return 'NOT_FOUND';
                     self.print_applicant_info(info["detail"])
                 else:
                     self.print_applicant_info()
+                return info
             else:
-                print("未找到符合条件的应聘者。")
+                print("該当する応募者が見つかりませんでした。")
+                return None
 
     def goto_applicants(self) -> bool:
         try:
@@ -260,7 +243,7 @@ return 'NOT_FOUND';
             self._maybe_switch_iframe()
             table = self._find_main_table()
             if not table:
-                print("未定位到包含『氏名/応募求人』表头的数据表。")
+                print("『氏名/応募求人』のヘッダを含む表が見つかりませんでした。")
                 return None
 
             # 计算列索引（1-based，便于 XPath）
@@ -271,7 +254,7 @@ return 'NOT_FOUND';
                 if ('氏名' in t) and (name_col_idx is None): name_col_idx = idx
                 if ('応募求人' in t or '求人' in t) and (occ_col_idx is None): occ_col_idx = idx
             if not name_col_idx or not occ_col_idx:
-                print("表头缺少『氏名』或『応募求人』，无法精确定位。")
+                print("表のヘッダに『氏名』または『応募求人』がありません。正確に位置づけできません。")
                 return None
 
             # 先做“精确相等”的行匹配
@@ -304,11 +287,11 @@ return 'NOT_FOUND';
 
                         if detail.get("oubo_no_ok"):
                             print(f"該当する応募No.を見つけました: {oubo_no}")
-                            # 在返回之前尝试填写メモ并保存
+                            # 戻る前にメモを記入して保存を試みる
                             try:
                                 self.set_memo_and_save('RPA:送信済み')
                             except Exception as e:
-                                print(f"メモ保存処理で例外が発生しました: {e}")
+                                print(f"メモ保存時に例外が発生しました: {e}")
                             # 返回 detail，避免外侧再重复去抓一次页面导致重复打印
                             return {"name": nm, "title": kyujin_title, "row_matched": True, "detail": detail}
 
@@ -318,7 +301,7 @@ return 'NOT_FOUND';
                         time.sleep(0.6)
                         seen_pairs.add(key)
                     except Exception as e:
-                        print(f"[DEBUG] 行处理异常: {e}")
+                        print(f"[DEBUG] 行処理で例外: {e}")
                         try: self.driver.switch_to.default_content()
                         except: pass
                         continue
@@ -336,7 +319,7 @@ return 'NOT_FOUND';
 
             # 当前页没找到 → 下一页
             if not self._paginate_next():
-                print("該当する求人タイトル・応募No.の応募者が見つかりませんでした（已到最后一页）。")
+                print("該当する求人タイトル・応募No.の応募者が見つかりませんでした（最終ページに到達しました）。")
                 return None
 
     # ---------- 详情页采集 ----------
@@ -555,3 +538,4 @@ return 'NOT_FOUND';
 
     def close(self):
         self.driver.quit()
+
