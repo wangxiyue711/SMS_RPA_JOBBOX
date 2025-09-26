@@ -1,0 +1,473 @@
+"use client";
+
+import React, { useEffect, useState } from "react";
+import { getClientAuth } from "../../lib/firebaseClient";
+import {
+  getFirestore,
+  collection,
+  query,
+  orderBy,
+  limit,
+  getDocs,
+} from "firebase/firestore";
+
+async function waitForAuthReady(timeout = 3000): Promise<any | null> {
+  const auth = getClientAuth();
+  if (!auth) return null;
+  if (auth.currentUser) return auth.currentUser;
+  return new Promise((resolve) => {
+    const unsub = (auth as any).onAuthStateChanged((u: any) => {
+      try {
+        unsub();
+      } catch {}
+      resolve(u);
+    });
+    setTimeout(() => {
+      try {
+        unsub();
+      } catch {}
+      resolve(null);
+    }, timeout);
+  });
+}
+
+
+export default function HistoryPage() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [serverRows, setServerRows] = useState<any[] | null>(null);
+
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
+  async function loadHistory() {
+    setLoading(true);
+    try {
+      const user = await waitForAuthReady();
+      if (!user) throw new Error("未ログインです。ログインしてください。");
+      const db = getFirestore();
+      const uid = (user as any).uid;
+      // collection path: accounts/{uid}/sms_history
+      const collRef = collection(db, "accounts", uid, "sms_history");
+      const q = query(collRef, orderBy("sentAt", "desc"), limit(100));
+      const snap = await getDocs(q);
+      const out: any[] = [];
+      snap.forEach((d) => {
+        out.push({ id: d.id, ...(d.data() as any) });
+      });
+      setRows(out);
+    } catch (e) {
+      console.error("loadHistory error", e);
+      setRows([]);
+    } finally {
+      setLoading(false);
+      setLoadedOnce(true);
+    }
+  }
+
+  function downloadCsv() {
+    const headers = [
+      "氏名",
+      "性別",
+      "生年月日",
+      "メールアドレス",
+      "電話番号",
+      "住所",
+      "学校名",
+      "応募No",
+      "送信日時",
+      "送信結果",
+    ];
+
+    const esc = (v: any) => {
+      if (v === undefined || v === null) return '""';
+      let s = String(v);
+      s = s.replace(/"/g, '""');
+      return `"${s}"`;
+    };
+
+    const lines = rows.map((r) => {
+      const name = r.name || r.fullName || "";
+      const gender = r.gender || "";
+      const birth = r.birth || r.birthdate || "";
+      const email = r.email || "";
+      const tel = r.tel || r.phone || r.mobilenumber || "";
+      const addr = r.addr || "";
+      const school = r.school || "";
+      const oubo = (() => {
+        const extracted = r.oubo_no_extracted;
+        if (extracted) return extracted;
+        const raw = r.oubo_no || "";
+        try {
+          const m = String(raw).match(/[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/);
+          if (m && m[0]) return m[0];
+        } catch (e) {}
+        return raw;
+      })();
+
+      const sent = (() => {
+        const v = r.sentAt || r.sent_at || r.sent_at_seconds || r.sent_at_ts;
+        if (v === undefined || v === null) return "";
+        try {
+          const s = Number(v);
+          if (!isFinite(s)) return "";
+          const d = new Date(s * 1000);
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, "0");
+          const day = String(d.getDate()).padStart(2, "0");
+          const hh = String(d.getHours()).padStart(2, "0");
+          const mm = String(d.getMinutes()).padStart(2, "0");
+          const ss = String(d.getSeconds()).padStart(2, "0");
+          return `${y}/${m}/${day} ${hh}:${mm}:${ss}`;
+        } catch (e) {
+          return "";
+        }
+      })();
+
+      const result = (() => {
+        const hasStatus = r.status !== undefined && r.status !== null && r.status !== "";
+        const hasResponse = r.response !== undefined && r.response !== null;
+        if (!hasStatus && !hasResponse) return "対象外";
+        if (hasStatus) {
+          try {
+            const s = String(r.status || "");
+            if (s === "target_out") return "対象外";
+          } catch (e) {}
+          return String(r.status);
+        }
+        try {
+          if (typeof r.response === "object" && r.response !== null) {
+            const sc = r.response.status_code || r.response.status || r.response.code;
+            if (sc !== undefined && sc !== null && sc !== "") return String(sc);
+          }
+          if (typeof r.response === "string" || typeof r.response === "number") return String(r.response);
+        } catch (e) {}
+        return "";
+      })();
+
+      return [name, gender, birth, email, tel, addr, school, oubo, sent, result]
+        .map(esc)
+        .join(',');
+    });
+
+    const csv = '\uFEFF' + headers.map(esc).join(',') + '\n' + lines.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `history_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'_')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div style={{ padding: 28 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}
+      >
+        <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>HISTORY</h2>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn" onClick={loadHistory} disabled={loading} style={{ width: 'auto' }}>
+            {loading ? "読み込み中..." : "更新"}
+          </button>
+          <button
+            className="btn btn-gray"
+            onClick={() => downloadCsv()}
+            disabled={rows.length === 0}
+            style={{ width: 'auto', display: 'inline-flex', alignItems: 'center' }}
+          >
+            <span className="btn-icon" aria-hidden>
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                {/* simple download-into-tray icon */}
+                <path d="M12 3v9" stroke="#000" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                <path d="M8 11l4 4 4-4" stroke="#000" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                <path d="M4 17a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1H4v1z" stroke="#000" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+              </svg>
+            </span>
+            <span>CSV出力</span>
+          </button>
+        </div>
+      </div>
+
+      {!loadedOnce && <div>読み込みしています...</div>}
+
+      {loadedOnce && rows.length === 0 && (
+        <div style={{ color: "#666" }}>履歴はまだありません。</div>
+      )}
+
+      {rows.length > 0 && (
+        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "separate",
+              borderSpacing: 0,
+              fontFamily:
+                "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial",
+              fontSize: 14,
+              color: "#222",
+            }}
+          >
+            <thead>
+              <tr
+                style={{
+                  background: "#f6f8fa",
+                  borderBottom: "1px solid #e6e9ee",
+                }}
+              >
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                    letterSpacing: ".2px",
+                  }}
+                >
+                  氏名
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  性別
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  生年月日
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  メールアドレス
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  電話番号
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  住所
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  学校名
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  応募No
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  送信日時
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  送信結果
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, idx) => (
+                <tr
+                  key={r.id}
+                  style={{
+                    borderBottom: "1px solid #eee",
+                    background: idx % 2 === 0 ? "#ffffff" : "#fbfcfd",
+                    transition: "background 120ms ease",
+                  }}
+                >
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {r.name || r.fullName || "-"}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {r.gender || "-"}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {r.birth || r.birthdate || "-"}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {r.email || "-"}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {r.tel || r.phone || r.mobilenumber || "-"}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {r.addr || "-"}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {r.school || "-"}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {(() => {
+                      // Prefer explicit extracted field. If absent, try to extract a clean 応募No pattern from r.oubo_no
+                      const extracted = r.oubo_no_extracted;
+                      if (extracted) return extracted;
+                      const raw = r.oubo_no || "";
+                      if (!raw) return "-";
+                      try {
+                        // Match patterns like A2-3616-7244 or 123-456-789 or alphanum groups separated by - (at least one dash)
+                        const m = String(raw).match(
+                          /[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/
+                        );
+                        if (m && m[0]) return m[0];
+                      } catch (e) {
+                        /* ignore */
+                      }
+                      // fallback to raw value
+                      return raw;
+                    })()}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {(() => {
+                      const v =
+                        r.sentAt ||
+                        r.sent_at ||
+                        r.sent_at_seconds ||
+                        r.sent_at_ts;
+                      if (!v && v !== 0) return "-";
+                      try {
+                        // ensure numeric seconds
+                        const s = Number(v);
+                        if (!isFinite(s)) return "-";
+                        const d = new Date(s * 1000);
+                        // JST display
+                        const opts: any = { timeZone: "Asia/Tokyo" };
+                        const y = d.getFullYear();
+                        const m = String(d.getMonth() + 1).padStart(2, "0");
+                        const day = String(d.getDate()).padStart(2, "0");
+                        const hh = String(d.getHours()).padStart(2, "0");
+                        const mm = String(d.getMinutes()).padStart(2, "0");
+                        const ss = String(d.getSeconds()).padStart(2, "0");
+                        return `${y}/${m}/${day} ${hh}:${mm}:${ss}`;
+                      } catch (e) {
+                        return "-";
+                      }
+                    })()}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {(() => {
+                      // If not a send target: show 対象外
+                      const hasStatus =
+                        r.status !== undefined &&
+                        r.status !== null &&
+                        r.status !== "";
+                      const hasResponse =
+                        r.response !== undefined && r.response !== null;
+                      // If neither status nor response => considered non-target (対象外)
+                      if (!hasStatus && !hasResponse) return "対象外";
+
+                      // Prefer numeric/status field if present
+                      if (hasStatus) {
+                        // If explicitly marked as target_out, show 【対象外】 instead of raw status
+                        try {
+                          const s = String(r.status || "");
+                          if (s === "target_out") return "対象外";
+                        } catch (e) {
+                          /* ignore */
+                        }
+                        // If status is a numeric string or number, show as-is
+                        return String(r.status);
+                      }
+
+                      // Else try response.status_code
+                      try {
+                        if (
+                          typeof r.response === "object" &&
+                          r.response !== null
+                        ) {
+                          const sc =
+                            r.response.status_code ||
+                            r.response.status ||
+                            r.response.code;
+                          if (sc !== undefined && sc !== null && sc !== "")
+                            return String(sc);
+                        }
+                        // fallback: if response is primitive, show it
+                        if (
+                          typeof r.response === "string" ||
+                          typeof r.response === "number"
+                        )
+                          return String(r.response);
+                      } catch (e) {
+                        // ignore
+                      }
+
+                      return "-";
+                    })()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {serverRows && (
+        <div style={{ marginTop: 18 }}>
+          <h3>Server fetched rows ({serverRows.length})</h3>
+          <pre
+            style={{
+              maxHeight: 300,
+              overflow: "auto",
+              background: "#fafafa",
+              padding: 8,
+            }}
+          >
+            {JSON.stringify(serverRows, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -12,9 +12,17 @@ export default function ClientShell({
 }) {
   const pathname = usePathname() ?? "";
 
-  // Hide header/sidebar on the login page and any login subpaths
-  // (covers `/login`, `/login/`, and `/login?next=...`)
-  if (pathname.startsWith("/login")) {
+  // Hide header/sidebar on the login page and API-related pages where
+  // we render a minimal response (these routes shouldn't show the app shell).
+  // Covers `/login`, `/api`, `/api-settings`, and their subpaths.
+  // Hide header/sidebar on the login page, and on Next.js API routes
+  // (we keep UI pages like `/api-settings` visible). This covers
+  // `/api` and any `/api/...` route while allowing `/api-settings`.
+  if (
+    pathname.startsWith("/login") ||
+    pathname === "/api" ||
+    pathname.startsWith("/api/")
+  ) {
     return <>{children}</>;
   }
 

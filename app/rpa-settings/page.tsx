@@ -314,6 +314,7 @@ export default function RPASettingsPage() {
         <div>アカウントはまだ保存されていません。</div>
       ) : (
         <ul
+          className="saved-list"
           style={{
             listStyle: "none",
             padding: 0,
