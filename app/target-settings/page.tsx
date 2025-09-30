@@ -40,6 +40,8 @@ export default function TargetSettingsPage() {
   });
   const [smsTemplateA, setSmsTemplateA] = useState("");
   const [smsTemplateB, setSmsTemplateB] = useState("");
+  const [smsUseA, setSmsUseA] = useState(true);
+  const [smsUseB, setSmsUseB] = useState(true);
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -80,6 +82,8 @@ export default function TargetSettingsPage() {
         });
         setSmsTemplateA(data.smsTemplateA ?? "");
         setSmsTemplateB(data.smsTemplateB ?? "");
+        setSmsUseA(data.smsUseA === undefined ? true : !!data.smsUseA);
+        setSmsUseB(data.smsUseB === undefined ? true : !!data.smsUseB);
       }
     } catch (e) {
       console.error("load target settings error", e);
@@ -116,6 +120,12 @@ export default function TargetSettingsPage() {
       const db = getFirestore();
       const uid = (user as any).uid;
       const docRef = doc(db, "accounts", uid, "target_settings", "settings");
+      // validate SMS template selection: at least one must be selected
+      if (!smsUseA && !smsUseB) {
+        alert("少なくとも1つのSMSテンプレートを選択してください（AまたはB）。");
+        setLoading(false);
+        return;
+      }
       console.log("Saving target settings for uid=", uid, {
         nameTypes,
         genders,
@@ -129,6 +139,8 @@ export default function TargetSettingsPage() {
           ageRanges,
           smsTemplateA,
           smsTemplateB,
+          smsUseA,
+          smsUseB,
           updatedAt: Date.now(),
         },
         { merge: true }
@@ -159,6 +171,24 @@ export default function TargetSettingsPage() {
           <legend style={{ fontWeight: 700, marginBottom: 8 }}>
             SMSテンプレート
           </legend>
+          <div style={{ marginBottom: 8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={smsUseA}
+                onChange={(e) => setSmsUseA(e.target.checked)}
+              />
+              A
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={smsUseB}
+                onChange={(e) => setSmsUseB(e.target.checked)}
+              />
+              B
+            </label>
+          </div>
           <div style={{ marginBottom: 6 }}>
             <label
               style={{ fontWeight: 600, display: "block", marginBottom: 4 }}
@@ -359,7 +389,11 @@ export default function TargetSettingsPage() {
           </div>
         </fieldset>
 
-        <button className="btn" type="submit" disabled={loading}>
+        <button
+          className="btn"
+          type="submit"
+          disabled={loading || (!smsUseA && !smsUseB)}
+        >
           {loading ? "保存中..." : "保存"}
         </button>
         {saved && (
