@@ -287,11 +287,8 @@ return 'NOT_FOUND';
 
                         if detail.get("oubo_no_ok"):
                             print(f"該当する応募No.を見つけました: {oubo_no}")
-                            # 戻る前にメモを記入して保存を試みる
-                            try:
-                                self.set_memo_and_save('RPA:送信済み')
-                            except Exception as e:
-                                print(f"メモ保存時に例外が発生しました: {e}")
+                            # NOTE: 不在这里立即写入メモ。
+                            # メモ("RPA:送信済み" 等) は send の結果を確認してから外側で書き込むように変更しました。
                             # 返回 detail，避免外侧再重复去抓一次页面导致重复打印
                             return {"name": nm, "title": kyujin_title, "row_matched": True, "detail": detail}
 

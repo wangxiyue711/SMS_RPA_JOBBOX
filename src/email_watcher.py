@@ -207,6 +207,72 @@ def get_api_settings(uid):
         return fallback
 
 
+def _find_service_account_file():
+    sa_candidates = [
+        os.path.join(os.getcwd(), 'service-account'),
+        os.path.join(os.path.dirname(__file__), '..', 'service-account'),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'service-account'),
+        os.path.join(os.getcwd(), 'src', 'service-account'),
+    ]
+    for c in sa_candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def _make_fields_for_firestore(doc: dict) -> dict:
+    fields = {}
+    for k, v in doc.items():
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            fields[k] = {'booleanValue': v}
+        elif isinstance(v, int):
+            fields[k] = {'integerValue': str(v)}
+        elif isinstance(v, dict):
+            # nested map
+            fields[k] = {'mapValue': {'fields': _make_fields_for_firestore(v)}}
+        else:
+            fields[k] = {'stringValue': str(v)}
+    return fields
+
+
+def write_sms_history(uid: str, doc: dict) -> bool:
+    """Write a minimal sms_history document under accounts/{uid}/sms_history using service account.
+
+    Returns True on success.
+    """
+    sa_file = _find_service_account_file()
+    if not sa_file:
+        print('service-account file not found; cannot write history')
+        return False
+    try:
+        import json
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        with open(sa_file, 'r', encoding='utf-8') as f:
+            sa = json.load(f)
+        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+        creds.refresh(Request())
+        token = creds.token
+        project = sa.get('project_id')
+        if not project:
+            print('service account missing project_id')
+            return False
+        url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/sms_history'
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+        body = {'fields': _make_fields_for_firestore(doc)}
+        r = requests.post(url, headers=headers, json=body, timeout=15)
+        if r.status_code in (200, 201):
+            return True
+        else:
+            print('Failed to write sms_history', r.status_code, r.text[:1000])
+            return False
+    except Exception as e:
+        print('Exception writing sms_history:', e)
+        return False
+
+
 def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll_seconds=30):
     print('IMAPサーバーに接続しています...')
     conn = imaplib.IMAP4_SSL(imap_host)
@@ -393,15 +459,11 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                 except Exception as e:
                                     print(f'自動ログイン中に例外が発生しました: {e}')
                                     info = None
-                                finally:
-                                    try:
-                                        jb.close()
-                                    except Exception:
-                                        pass
+                                # 不在此处关闭 jb；保留会话以便在发送成功时写入メモ。
                                 # 如果 login_and_goto 返回了 detail，则调用云端的 target_settings 做匹配判定
                                 try:
                                     if info and isinstance(info, dict) and info.get('detail'):
-                                        detail = info.get('detail')
+                                        detail = info.get('detail') or {}
 
                                         def get_target_settings(uid):
                                             if not uid:
@@ -558,7 +620,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 dry_run = os.environ.get("DRY_RUN_SMS", "false").lower() in ("1", "true", "yes")
                                                 if dry_run:
                                                     print(f"DRY_RUN_SMS enabled — would send to {to_number}: {body}")
-                                                    return True
+                                                    return (True, {'note': 'dry_run'})
 
                                                 base = api_cfg.get("baseUrl") or os.environ.get("SMS_PUBLISHER_BASEURL")
                                                 api_id = api_cfg.get("apiId") or os.environ.get("SMS_PUBLISHER_APIID")
@@ -672,48 +734,34 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             r2 = requests.post(url, headers=headers, data=data_alt, params=params, timeout=timeout)
                                                             # treat r2
                                                             if 200 <= r2.status_code < 300:
+                                                                info_r2 = {'status_code': r2.status_code, 'text': r2.text[:2000]}
                                                                 try:
-                                                                    j = r2.json()
-                                                                    print('送信成功(リトライ)', {'status_code': r2.status_code, 'json': j})
+                                                                    info_r2['json'] = r2.json()
                                                                 except Exception:
-                                                                    print('送信成功(リトライ)', {'status_code': r2.status_code, 'text': r2.text[:2000]})
-                                                                return True
+                                                                    pass
+                                                                print('送信成功(リトライ)', info_r2)
+                                                                return (True, info_r2)
                                                             else:
-                                                                print('送信失敗(リトライ)', {'status_code': r2.status_code, 'text': r2.text[:2000]})
-                                                                return False
+                                                                info_r2 = {'status_code': r2.status_code, 'text': r2.text[:2000]}
+                                                                print('送信失敗(リトライ)', info_r2)
+                                                                return (False, info_r2)
 
                                                     # Check HTTP status
+                                                    info_r = {'status_code': r.status_code, 'text': r.text[:2000]}
                                                     if 200 <= r.status_code < 300:
-                                                        # Try to parse JSON and check for success flags
                                                         try:
-                                                            j = r.json()
-                                                            if isinstance(j, dict):
-                                                                if j.get("success") in (True, "true", "True", 1) or j.get("ok") in (True, "true", "True", 1):
-                                                                    print(f"SMS PUBLISHER reported success for {to_number}")
-                                                                    return True
-                                                                # If no explicit flag, assume 2xx is success
-                                                            print(f"SMS PUBLISHER returned 2xx for {to_number}: {r.status_code}")
-                                                            return True
-                                                        except ValueError:
-                                                            # Not JSON, but 2xx -> success
-                                                            print(f"SMS PUBLISHER returned 2xx for {to_number}: {r.status_code} (non-JSON)")
-                                                            return True
-                                                    else:
-                                                        # Non-2xx
-                                                        txt = r.text[:1000]
-                                                        print(f"SMS PUBLISHER HTTP {r.status_code}: {txt}")
-                                                        # Try JSON error details
-                                                        try:
-                                                            j = r.json()
-                                                            if isinstance(j, dict) and (j.get("success") in (False, "false", "False", 0) or j.get("ok") in (False, "false", "False", 0)):
-                                                                return False
-                                                        except ValueError:
+                                                            info_r['json'] = r.json()
+                                                        except Exception:
                                                             pass
-                                                        return False
+                                                        print(f"SMS PUBLISHER returned 2xx for {to_number}: {r.status_code}")
+                                                        return (True, info_r)
+                                                    else:
+                                                        print(f"SMS PUBLISHER HTTP {r.status_code}: {r.text[:1000]}")
+                                                        return (False, info_r)
 
                                                 except requests.RequestException as e:
                                                     print(f"Network error sending SMS via SMS PUBLISHER: {e}")
-                                                    return False
+                                                    return (False, {'error': str(e)})
 
                                             def send_sms_router(to_number, body):
                                                 if provider == 'sms_publisher':
@@ -722,24 +770,144 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 dry = os.environ.get('DRY_RUN_SMS') in ('1','true','True')
                                                 if dry:
                                                     print(f"[DRY_RUN] SMS ({provider}) => to={to_number} body={body}")
-                                                    return True
+                                                    return (True, {'note': 'dry_run'})
                                                 print(f"未対応のプロバイダ: {provider} - ログに記録します。")
                                                 with open('sms_outbox.log', 'a', encoding='utf-8') as f:
                                                     f.write(f"{time.time()}\t{provider}\t{to_number}\t{body}\n")
-                                                return True
+                                                return (True, {'note': 'logged'})
 
                                             tel = detail.get('tel') or detail.get('電話番号') or ''
                                             tpl = ts.get('smsTemplateA') if ts.get('smsTemplateA') else ts.get('smsTemplateB')
                                             if tel and tpl:
                                                 norm, ok, reason = normalize_phone_number(tel)
+                                                dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
                                                 if not ok:
                                                     print(f'電話番号の検証に失敗しました: {tel} -> {norm} 理由: {reason}。SMSは送信されません。')
+                                                    # write target-out / invalid-phone history when not dry-run
+                                                    if not dry_run_env and uid:
+                                                        try:
+                                                            rec = {
+                                                                'name': detail.get('name'),
+                                                                'gender': detail.get('gender'),
+                                                                'birth': detail.get('birth'),
+                                                                'email': detail.get('email'),
+                                                                'tel': norm,
+                                                                'addr': detail.get('addr'),
+                                                                'school': detail.get('school'),
+                                                                'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                                'status': 'invalid_phone',
+                                                                'response': {'note': f'invalid phone: {reason}'},
+                                                                'sentAt': int(time.time())
+                                                            }
+                                                            ok_write = write_sms_history(str(uid), rec)
+                                                            if not ok_write:
+                                                                print('Failed to write sms_history for invalid phone')
+                                                        except Exception as e:
+                                                            print('Exception when writing sms_history for invalid phone:', e)
                                                 else:
-                                                    send_sms_router(norm, tpl)
+                                                    success, info = send_sms_router(norm, tpl)
+                                                    # Only write history when not dry-run and send succeeded
+                                                    if success and not dry_run_env:
+                                                        try:
+                                                            rec = {
+                                                                'name': detail.get('name'),
+                                                                'gender': detail.get('gender'),
+                                                                'birth': detail.get('birth'),
+                                                                'email': detail.get('email'),
+                                                                'tel': norm,
+                                                                'addr': detail.get('addr'),
+                                                                'school': detail.get('school'),
+                                                                'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                                'status': 'sent',
+                                                                'response': info if isinstance(info, dict) else {'note': str(info)},
+                                                                'sentAt': int(time.time())
+                                                            }
+                                                            ok_write = False
+                                                            if uid:
+                                                                try:
+                                                                    ok_write = write_sms_history(str(uid), rec)
+                                                                except Exception:
+                                                                    ok_write = False
+                                                            if not ok_write:
+                                                                print('Failed to write sms_history after send')
+                                                        except Exception as e:
+                                                            print('Exception when writing sms_history:', e)
+                                                    # If target and send succeeded and provider returned HTTP 200, write Jobbox memo
+                                                    try:
+                                                        status_code = None
+                                                        if isinstance(info, dict) and 'status_code' in info:
+                                                            try:
+                                                                status_code = int(info.get('status_code'))
+                                                            except Exception:
+                                                                status_code = None
+                                                    except Exception:
+                                                        status_code = None
+                                                    # Only write memo when candidate is target, send succeeded, exact HTTP 200, and not dry-run
+                                                    if is_target and success and (status_code == 200) and (not dry_run_env):
+                                                        try:
+                                                            jb.set_memo_and_save('RPA:送信済み')
+                                                        except Exception as e:
+                                                            print('メモ保存時に例外が発生しました:', e)
+                                            # Ensure jb is closed after processing this match_account
+                                            try:
+                                                jb.close()
+                                            except Exception:
+                                                pass
                                             else:
                                                 print('電話番号またはテンプレートが不足しているため、SMSは送信されませんでした。')
+                                                dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
+                                                if not dry_run_env and uid:
+                                                    try:
+                                                        rec = {
+                                                            'name': detail.get('name'),
+                                                            'gender': detail.get('gender'),
+                                                            'birth': detail.get('birth'),
+                                                            'email': detail.get('email'),
+                                                            'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                            'addr': detail.get('addr'),
+                                                            'school': detail.get('school'),
+                                                            'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                            'status': 'no_tel_or_template',
+                                                            'response': {'note': 'missing tel or template'},
+                                                            'sentAt': int(time.time())
+                                                        }
+                                                        ok_write = write_sms_history(str(uid), rec)
+                                                        if not ok_write:
+                                                            print('Failed to write sms_history for missing tel/template')
+                                                    except Exception as e:
+                                                        print('Exception when writing sms_history for missing tel/template:', e)
                                         else:
                                             print('この応募者は SMS の対象外です。')
+                                            dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
+                                            if not dry_run_env and uid:
+                                                try:
+                                                    rec = {
+                                                        'name': detail.get('name'),
+                                                        'gender': detail.get('gender'),
+                                                        'birth': detail.get('birth'),
+                                                        'email': detail.get('email'),
+                                                        'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                        'addr': detail.get('addr'),
+                                                        'school': detail.get('school'),
+                                                        'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                        'status': 'target_out',
+                                                        'response': {'note': 'evaluated as not target'},
+                                                        'sentAt': int(time.time())
+                                                    }
+                                                    ok_write = write_sms_history(str(uid), rec)
+                                                    if not ok_write:
+                                                        print('Failed to write sms_history for target-out')
+                                                except Exception as e:
+                                                    print('Exception when writing sms_history for target-out:', e)
+                                                # 写入 Jobbox メモ为「RPA:対象外」，如果我们仍然持有 jb 会话且不是 dry-run
+                                                try:
+                                                    if (not dry_run_env) and 'jb' in locals() and jb:
+                                                        try:
+                                                            jb.set_memo_and_save('RPA:対象外')
+                                                        except Exception as e:
+                                                            print('メモ保存(対象外)時に例外が発生しました:', e)
+                                                except Exception:
+                                                    pass
                                 except Exception as e:
                                     print(f'対象判定中に例外が発生しました: {e}')
                 else:
@@ -998,7 +1166,11 @@ def send_sms_once(uid, to_number, template_type='A', live=False):
                 data_alt = dict(data)
                 data_alt['mobilenumber'] = alt
                 print('Retrying with 81 prefixed number:', alt)
-                r2 = requests.post(url, headers=headers, data=data_alt, params=params, timeout=15)
+                try:
+                    r2 = requests.post(url, headers=headers, data=data_alt, params=params, timeout=15)
+                except Exception as e:
+                    print('Retry request failed:', e)
+                    return (False, {'error': str(e)})
                 info = {'status_code': r2.status_code, 'text': r2.text[:2000]}
                 if 200 <= r2.status_code < 300:
                     try:
@@ -1006,6 +1178,12 @@ def send_sms_once(uid, to_number, template_type='A', live=False):
                     except Exception:
                         pass
                     print('送信成功(リトライ)', info)
+                    if live:
+                        try:
+                            rec = {'tel': norm, 'status': 'sent', 'response': info, 'sentAt': int(time.time()), 'template': template_type}
+                            write_sms_history(uid, rec)
+                        except Exception:
+                            pass
                     return (True, info)
                 else:
                     print('送信失敗(リトライ)', info)
@@ -1017,6 +1195,12 @@ def send_sms_once(uid, to_number, template_type='A', live=False):
             except Exception:
                 pass
             print('送信成功', info)
+            if live:
+                try:
+                    rec = {'tel': norm, 'status': 'sent', 'response': info, 'sentAt': int(time.time()), 'template': template_type}
+                    write_sms_history(uid, rec)
+                except Exception:
+                    pass
             return (True, info)
         else:
             print('送信失敗', info)

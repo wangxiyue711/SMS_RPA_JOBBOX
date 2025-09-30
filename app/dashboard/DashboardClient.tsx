@@ -111,7 +111,7 @@ export default function DashboardClient() {
           targetOut += 1;
           return;
         }
-        if (status === "sent") {
+        if (status === "送信済") {
           sent += 1;
           return;
         }
