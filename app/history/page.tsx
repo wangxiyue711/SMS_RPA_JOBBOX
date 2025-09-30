@@ -67,11 +67,66 @@ export default function HistoryPage() {
     }
   }
 
+  // Extract a name and furigana from a single string.
+  // Heuristics:
+  // - If the string contains parentheses (half/full width) at the end, and the
+  //   content inside parentheses contains hiragana/katakana, treat that as furigana.
+  // - Otherwise return the original string as name and empty furigana.
+  function extractNameAndFurigana(raw: string): { name: string; furigana: string } {
+    if (!raw) return { name: "", furigana: "" };
+    try {
+      const s = String(raw).trim();
+      // match trailing parentheses content
+      const m = s.match(/^(.+?)\s*[（(]\s*([^）)]+)\s*[）)]\s*$/);
+      if (m) {
+        const left = m[1].trim();
+        const inside = m[2].trim();
+        // if inside contains hiragana or katakana, treat as furigana
+        if (/[\u3040-\u30FF]/.test(inside)) {
+          return { name: left || "", furigana: inside || "" };
+        }
+        // sometimes the main part is kana and parentheses contains kanji; swap
+        if (/[\u3040-\u30FF]/.test(left) && /[\u4E00-\u9FFF]/.test(inside)) {
+          return { name: inside || "", furigana: left || "" };
+        }
+        // otherwise keep left as name and parentheses as furigana (best-effort)
+        return { name: left || "", furigana: inside || "" };
+      }
+      return { name: s, furigana: "" };
+    } catch (e) {
+      return { name: raw, furigana: "" };
+    }
+  }
+
+  // Parse birth date and optional age in parentheses. Handles formats like:
+  // "1999年11月12日 (25歳)", "1999年11月12日（25歳）", or just "1999-11-12", etc.
+  function extractBirthAndAge(raw: any): { birth: string; age: string } {
+    if (!raw && raw !== 0) return { birth: "", age: "" };
+    try {
+      const s = String(raw).trim();
+      // Match trailing parentheses with age
+      const m = s.match(/^(.+?)\s*[（(]\s*([0-9]{1,3})\s*歳?\s*[）)]\s*$/);
+      if (m) {
+        const birthPart = m[1].trim();
+        const agePart = m[2].trim();
+        return { birth: birthPart, age: agePart };
+      }
+      // If no parentheses, try to extract an ISO-like date or Japanese date string
+      // We'll heuristically accept the whole string as birth
+      return { birth: s, age: "" };
+    } catch (e) {
+      return { birth: String(raw), age: "" };
+    }
+  }
+
+
   function downloadCsv() {
     const headers = [
       "氏名",
+      "ふりがな",
       "性別",
       "生年月日",
+      "年齢",
       "メールアドレス",
       "電話番号",
       "住所",
@@ -89,9 +144,15 @@ export default function HistoryPage() {
     };
 
     const lines = rows.map((r) => {
-      const name = r.name || r.fullName || "";
+      const namePair = extractNameAndFurigana(r.name || r.fullName || "");
+      const name = namePair.name;
+      const furigana = namePair.furigana;
+      // const name already extracted above
       const gender = r.gender || "";
-      const birth = r.birth || r.birthdate || "";
+  const birthRaw = r.birth || r.birthdate || "";
+  const birthPair = extractBirthAndAge(birthRaw);
+  const birth = birthPair.birth;
+  const age = birthPair.age;
       const email = r.email || "";
       const tel = r.tel || r.phone || r.mobilenumber || "";
       const addr = r.addr || "";
@@ -147,7 +208,7 @@ export default function HistoryPage() {
         return "";
       })();
 
-      return [name, gender, birth, email, tel, addr, school, oubo, sent, result]
+      return [name, furigana, gender, birth, age, email, tel, addr, school, oubo, sent, result]
         .map(esc)
         .join(',');
     });
@@ -241,6 +302,15 @@ export default function HistoryPage() {
                     fontWeight: 700,
                   }}
                 >
+                  ふりがな
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
                   性別
                 </th>
                 <th
@@ -251,6 +321,15 @@ export default function HistoryPage() {
                   }}
                 >
                   生年月日
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  年齢
                 </th>
                 <th
                   style={{
@@ -328,13 +407,33 @@ export default function HistoryPage() {
                   }}
                 >
                   <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {r.name || r.fullName || "-"}
+                    {(() => {
+                      const p = extractNameAndFurigana(r.name || r.fullName || "");
+                      return p.name || (r.name || r.fullName || "-");
+                    })()}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {(() => {
+                      const p = extractNameAndFurigana(r.name || r.fullName || "");
+                      return p.furigana || "-";
+                    })()}
                   </td>
                   <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
                     {r.gender || "-"}
                   </td>
                   <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {r.birth || r.birthdate || "-"}
+                    {(() => {
+                      const raw = r.birth || r.birthdate || "";
+                      const bp = extractBirthAndAge(raw);
+                      return bp.birth || "-";
+                    })()}
+                  </td>
+                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    {(() => {
+                      const raw = r.birth || r.birthdate || "";
+                      const bp = extractBirthAndAge(raw);
+                      return bp.age || "-";
+                    })()}
                   </td>
                   <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
                     {r.email || "-"}
