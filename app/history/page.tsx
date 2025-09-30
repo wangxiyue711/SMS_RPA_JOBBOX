@@ -31,7 +31,6 @@ async function waitForAuthReady(timeout = 3000): Promise<any | null> {
   });
 }
 
-
 export default function HistoryPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -72,7 +71,10 @@ export default function HistoryPage() {
   // - If the string contains parentheses (half/full width) at the end, and the
   //   content inside parentheses contains hiragana/katakana, treat that as furigana.
   // - Otherwise return the original string as name and empty furigana.
-  function extractNameAndFurigana(raw: string): { name: string; furigana: string } {
+  function extractNameAndFurigana(raw: string): {
+    name: string;
+    furigana: string;
+  } {
     if (!raw) return { name: "", furigana: "" };
     try {
       const s = String(raw).trim();
@@ -119,7 +121,6 @@ export default function HistoryPage() {
     }
   }
 
-
   function downloadCsv() {
     const headers = [
       "氏名",
@@ -149,10 +150,10 @@ export default function HistoryPage() {
       const furigana = namePair.furigana;
       // const name already extracted above
       const gender = r.gender || "";
-  const birthRaw = r.birth || r.birthdate || "";
-  const birthPair = extractBirthAndAge(birthRaw);
-  const birth = birthPair.birth;
-  const age = birthPair.age;
+      const birthRaw = r.birth || r.birthdate || "";
+      const birthPair = extractBirthAndAge(birthRaw);
+      const birth = birthPair.birth;
+      const age = birthPair.age;
       const email = r.email || "";
       const tel = r.tel || r.phone || r.mobilenumber || "";
       const addr = r.addr || "";
@@ -188,7 +189,8 @@ export default function HistoryPage() {
       })();
 
       const result = (() => {
-        const hasStatus = r.status !== undefined && r.status !== null && r.status !== "";
+        const hasStatus =
+          r.status !== undefined && r.status !== null && r.status !== "";
         const hasResponse = r.response !== undefined && r.response !== null;
         if (!hasStatus && !hasResponse) return "対象外";
         if (hasStatus) {
@@ -200,25 +202,43 @@ export default function HistoryPage() {
         }
         try {
           if (typeof r.response === "object" && r.response !== null) {
-            const sc = r.response.status_code || r.response.status || r.response.code;
+            const sc =
+              r.response.status_code || r.response.status || r.response.code;
             if (sc !== undefined && sc !== null && sc !== "") return String(sc);
           }
-          if (typeof r.response === "string" || typeof r.response === "number") return String(r.response);
+          if (typeof r.response === "string" || typeof r.response === "number")
+            return String(r.response);
         } catch (e) {}
         return "";
       })();
 
-      return [name, furigana, gender, birth, age, email, tel, addr, school, oubo, sent, result]
+      return [
+        name,
+        furigana,
+        gender,
+        birth,
+        age,
+        email,
+        tel,
+        addr,
+        school,
+        oubo,
+        sent,
+        result,
+      ]
         .map(esc)
-        .join(',');
+        .join(",");
     });
 
-    const csv = '\uFEFF' + headers.map(esc).join(',') + '\n' + lines.join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const csv = "\uFEFF" + headers.map(esc).join(",") + "\n" + lines.join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `history_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'_')}.csv`;
+    a.download = `history_${new Date()
+      .toISOString()
+      .slice(0, 19)
+      .replace(/[:T]/g, "_")}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -236,22 +256,56 @@ export default function HistoryPage() {
         }}
       >
         <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>HISTORY</h2>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button className="btn" onClick={loadHistory} disabled={loading} style={{ width: 'auto' }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            className="btn"
+            onClick={loadHistory}
+            disabled={loading}
+            style={{ width: "auto" }}
+          >
             {loading ? "読み込み中..." : "更新"}
           </button>
           <button
             className="btn btn-gray"
             onClick={() => downloadCsv()}
             disabled={rows.length === 0}
-            style={{ width: 'auto', display: 'inline-flex', alignItems: 'center' }}
+            style={{
+              width: "auto",
+              display: "inline-flex",
+              alignItems: "center",
+            }}
           >
             <span className="btn-icon" aria-hidden>
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+              <svg
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden
+              >
                 {/* simple download-into-tray icon */}
-                <path d="M12 3v9" stroke="#000" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                <path d="M8 11l4 4 4-4" stroke="#000" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                <path d="M4 17a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1H4v1z" stroke="#000" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                <path
+                  d="M12 3v9"
+                  stroke="#000"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
+                <path
+                  d="M8 11l4 4 4-4"
+                  stroke="#000"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
+                <path
+                  d="M4 17a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1H4v1z"
+                  stroke="#000"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
               </svg>
             </span>
             <span>CSV出力</span>
@@ -408,13 +462,17 @@ export default function HistoryPage() {
                 >
                   <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
                     {(() => {
-                      const p = extractNameAndFurigana(r.name || r.fullName || "");
-                      return p.name || (r.name || r.fullName || "-");
+                      const p = extractNameAndFurigana(
+                        r.name || r.fullName || ""
+                      );
+                      return p.name || r.name || r.fullName || "-";
                     })()}
                   </td>
                   <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
                     {(() => {
-                      const p = extractNameAndFurigana(r.name || r.fullName || "");
+                      const p = extractNameAndFurigana(
+                        r.name || r.fullName || ""
+                      );
                       return p.furigana || "-";
                     })()}
                   </td>
