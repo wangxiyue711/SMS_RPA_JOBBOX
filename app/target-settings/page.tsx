@@ -42,6 +42,13 @@ export default function TargetSettingsPage() {
   const [smsTemplateB, setSmsTemplateB] = useState("");
   const [smsUseA, setSmsUseA] = useState(true);
   const [smsUseB, setSmsUseB] = useState(true);
+  const [autoReply, setAutoReply] = useState(false);
+  const [mailUseTarget, setMailUseTarget] = useState(true);
+  const [mailUseNonTarget, setMailUseNonTarget] = useState(false);
+  const [mailTemplateA, setMailTemplateA] = useState("");
+  const [mailTemplateB, setMailTemplateB] = useState("");
+  const [mailSubjectA, setMailSubjectA] = useState("");
+  const [mailSubjectB, setMailSubjectB] = useState("");
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -84,6 +91,17 @@ export default function TargetSettingsPage() {
         setSmsTemplateB(data.smsTemplateB ?? "");
         setSmsUseA(data.smsUseA === undefined ? true : !!data.smsUseA);
         setSmsUseB(data.smsUseB === undefined ? true : !!data.smsUseB);
+        setAutoReply(data.autoReply === undefined ? false : !!data.autoReply);
+        setMailUseTarget(
+          data.mailUseTarget === undefined ? true : !!data.mailUseTarget
+        );
+        setMailUseNonTarget(
+          data.mailUseNonTarget === undefined ? false : !!data.mailUseNonTarget
+        );
+        setMailTemplateA(data.mailTemplateA ?? "");
+        setMailTemplateB(data.mailTemplateB ?? "");
+        setMailSubjectA(data.mailSubjectA ?? "");
+        setMailSubjectB(data.mailSubjectB ?? "");
       }
     } catch (e) {
       console.error("load target settings error", e);
@@ -141,6 +159,13 @@ export default function TargetSettingsPage() {
           smsTemplateB,
           smsUseA,
           smsUseB,
+          autoReply,
+          mailUseTarget,
+          mailUseNonTarget,
+          mailTemplateA,
+          mailTemplateB,
+          mailSubjectA,
+          mailSubjectB,
           updatedAt: Date.now(),
         },
         { merge: true }
@@ -167,10 +192,18 @@ export default function TargetSettingsPage() {
 
       <form onSubmit={handleSave} autoComplete="off">
         {/* 短信模板输入区域 */}
-        <fieldset style={{ marginBottom: 16, border: "none", padding: 0 }}>
-          <legend style={{ fontWeight: 700, marginBottom: 8 }}>
+        <div
+          style={{
+            marginBottom: 16,
+            border: "1px solid rgba(0,0,0,0.08)",
+            borderRadius: 8,
+            padding: 12,
+            background: "rgba(255,255,255,0.98)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 16 }}>
             SMSテンプレート
-          </legend>
+          </div>
           <div style={{ marginBottom: 8 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input
@@ -189,6 +222,7 @@ export default function TargetSettingsPage() {
               B
             </label>
           </div>
+
           <div style={{ marginBottom: 6 }}>
             <label
               style={{ fontWeight: 600, display: "block", marginBottom: 4 }}
@@ -201,6 +235,8 @@ export default function TargetSettingsPage() {
               rows={3}
               style={{
                 width: "100%",
+                maxWidth: "100%",
+                boxSizing: "border-box",
                 resize: "vertical",
                 fontSize: 15,
                 padding: 8,
@@ -220,6 +256,8 @@ export default function TargetSettingsPage() {
               rows={3}
               style={{
                 width: "100%",
+                maxWidth: "100%",
+                boxSizing: "border-box",
                 resize: "vertical",
                 fontSize: 15,
                 padding: 8,
@@ -227,11 +265,162 @@ export default function TargetSettingsPage() {
               placeholder="B用のSMS内容を入力してください"
             />
           </div>
-        </fieldset>
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            marginBottom: 12,
+            border: "1px solid rgba(0,0,0,0.08)",
+            borderRadius: 8,
+            padding: 12,
+            background: "rgba(255,255,255,0.98)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 16 }}>
+            MAILテンプレート
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={autoReply}
+                onChange={(e) => setAutoReply(e.target.checked)}
+              />
+              メールで自動返信する
+            </label>
+          </div>
+
+          {autoReply && (
+            <React.Fragment>
+              <div style={{ marginBottom: 8 }}>
+                <label
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={mailUseTarget}
+                    onChange={(e) => setMailUseTarget(e.target.checked)}
+                  />
+                  対象に送信する
+                </label>
+
+                {mailUseTarget && (
+                  <div style={{ marginTop: 6, marginBottom: 6 }}>
+                    <label
+                      style={{
+                        fontWeight: 600,
+                        display: "block",
+                        marginBottom: 4,
+                      }}
+                    >
+                      対象向け
+                    </label>
+                    <input
+                      type="text"
+                      value={mailSubjectA}
+                      onChange={(e) => setMailSubjectA(e.target.value)}
+                      placeholder="メールの件名（対象向け）"
+                      style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        padding: 8,
+                        fontSize: 14,
+                        marginBottom: 8,
+                      }}
+                    />
+                    <textarea
+                      value={mailTemplateA}
+                      onChange={(e) => setMailTemplateA(e.target.value)}
+                      rows={4}
+                      style={{
+                        width: "100%",
+                        maxWidth: "100%",
+                        boxSizing: "border-box",
+                        resize: "vertical",
+                        fontSize: 15,
+                        padding: 8,
+                      }}
+                      placeholder="対象向けのメールテンプレート"
+                    />
+                  </div>
+                )}
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginTop: 6,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={mailUseNonTarget}
+                    onChange={(e) => setMailUseNonTarget(e.target.checked)}
+                  />
+                  非対象に送信する
+                </label>
+
+                {mailUseNonTarget && (
+                  <div style={{ marginTop: 6, marginBottom: 6 }}>
+                    <label
+                      style={{
+                        fontWeight: 600,
+                        display: "block",
+                        marginBottom: 4,
+                      }}
+                    >
+                      非対象向け
+                    </label>
+                    <input
+                      type="text"
+                      value={mailSubjectB}
+                      onChange={(e) => setMailSubjectB(e.target.value)}
+                      placeholder="メールの件名（非対象向け）"
+                      style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        padding: 8,
+                        fontSize: 14,
+                        marginBottom: 8,
+                      }}
+                    />
+                    <textarea
+                      value={mailTemplateB}
+                      onChange={(e) => setMailTemplateB(e.target.value)}
+                      rows={4}
+                      style={{
+                        width: "100%",
+                        maxWidth: "100%",
+                        boxSizing: "border-box",
+                        resize: "vertical",
+                        fontSize: 15,
+                        padding: 8,
+                      }}
+                      placeholder="非対象向けのメールテンプレート"
+                    />
+                  </div>
+                )}
+              </div>
+            </React.Fragment>
+          )}
+        </div>
 
         {/* 既存设置区域 ...existing code... */}
-        <fieldset style={{ marginBottom: 12, border: "none", padding: 0 }}>
-          <legend style={{ fontWeight: 700, marginBottom: 8 }}>名前</legend>
+        <div
+          style={{
+            marginBottom: 12,
+            border: "1px solid rgba(0,0,0,0.08)",
+            borderRadius: 8,
+            padding: 12,
+            background: "rgba(255,255,255,0.98)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 16 }}>
+            名前
+          </div>
           <div style={{ marginBottom: 8 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input
@@ -280,12 +469,20 @@ export default function TargetSettingsPage() {
               アルファベット名
             </label>
           </div>
-        </fieldset>
+        </div>
 
-        <fieldset style={{ marginBottom: 12, border: "none", padding: 0 }}>
-          <legend style={{ fontWeight: 700, marginBottom: 8 }}>
+        <div
+          style={{
+            marginBottom: 12,
+            border: "1px solid rgba(0,0,0,0.08)",
+            borderRadius: 8,
+            padding: 12,
+            background: "rgba(255,255,255,0.98)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 16 }}>
             性別と年齢
-          </legend>
+          </div>
           <div
             style={{
               display: "flex",
@@ -387,7 +584,7 @@ export default function TargetSettingsPage() {
               </div>
             </div>
           </div>
-        </fieldset>
+        </div>
 
         <button
           className="btn"
