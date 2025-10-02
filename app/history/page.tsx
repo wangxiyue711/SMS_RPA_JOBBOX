@@ -464,160 +464,162 @@ export default function HistoryPage() {
               {rows
                 .slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
                 .map((r, idx) => (
-                <tr
-                  key={r.id}
-                  style={{
-                    borderBottom: "1px solid #eee",
-                    background:
-                      (page * PAGE_SIZE + idx) % 2 === 0 ? "#ffffff" : "#fbfcfd",
-                    transition: "background 120ms ease",
-                  }}
-                >
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {(() => {
-                      const p = extractNameAndFurigana(
-                        r.name || r.fullName || ""
-                      );
-                      return p.name || r.name || r.fullName || "-";
-                    })()}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {(() => {
-                      const p = extractNameAndFurigana(
-                        r.name || r.fullName || ""
-                      );
-                      return p.furigana || "-";
-                    })()}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {r.gender || "-"}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {(() => {
-                      const raw = r.birth || r.birthdate || "";
-                      const bp = extractBirthAndAge(raw);
-                      return bp.birth || "-";
-                    })()}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {(() => {
-                      const raw = r.birth || r.birthdate || "";
-                      const bp = extractBirthAndAge(raw);
-                      return bp.age || "-";
-                    })()}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {r.email || "-"}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {r.tel || r.phone || r.mobilenumber || "-"}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {r.addr || "-"}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {r.school || "-"}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {(() => {
-                      // Prefer explicit extracted field. If absent, try to extract a clean 応募No pattern from r.oubo_no
-                      const extracted = r.oubo_no_extracted;
-                      if (extracted) return extracted;
-                      const raw = r.oubo_no || "";
-                      if (!raw) return "-";
-                      try {
-                        // Match patterns like A2-3616-7244 or 123-456-789 or alphanum groups separated by - (at least one dash)
-                        const m = String(raw).match(
-                          /[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/
+                  <tr
+                    key={r.id}
+                    style={{
+                      borderBottom: "1px solid #eee",
+                      background:
+                        (page * PAGE_SIZE + idx) % 2 === 0
+                          ? "#ffffff"
+                          : "#fbfcfd",
+                      transition: "background 120ms ease",
+                    }}
+                  >
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {(() => {
+                        const p = extractNameAndFurigana(
+                          r.name || r.fullName || ""
                         );
-                        if (m && m[0]) return m[0];
-                      } catch (e) {
-                        /* ignore */
-                      }
-                      // fallback to raw value
-                      return raw;
-                    })()}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {(() => {
-                      const v =
-                        r.sentAt ||
-                        r.sent_at ||
-                        r.sent_at_seconds ||
-                        r.sent_at_ts;
-                      if (!v && v !== 0) return "-";
-                      try {
-                        // ensure numeric seconds
-                        const s = Number(v);
-                        if (!isFinite(s)) return "-";
-                        const d = new Date(s * 1000);
-                        // JST display
-                        const opts: any = { timeZone: "Asia/Tokyo" };
-                        const y = d.getFullYear();
-                        const m = String(d.getMonth() + 1).padStart(2, "0");
-                        const day = String(d.getDate()).padStart(2, "0");
-                        const hh = String(d.getHours()).padStart(2, "0");
-                        const mm = String(d.getMinutes()).padStart(2, "0");
-                        const ss = String(d.getSeconds()).padStart(2, "0");
-                        return `${y}/${m}/${day} ${hh}:${mm}:${ss}`;
-                      } catch (e) {
-                        return "-";
-                      }
-                    })()}
-                  </td>
-                  <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                    {(() => {
-                      // If not a send target: show 対象外
-                      const hasStatus =
-                        r.status !== undefined &&
-                        r.status !== null &&
-                        r.status !== "";
-                      const hasResponse =
-                        r.response !== undefined && r.response !== null;
-                      // If neither status nor response => considered non-target (対象外)
-                      if (!hasStatus && !hasResponse) return "対象外";
-
-                      // Prefer numeric/status field if present
-                      if (hasStatus) {
-                        // If explicitly marked as target_out, show 【対象外】 instead of raw status
+                        return p.name || r.name || r.fullName || "-";
+                      })()}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {(() => {
+                        const p = extractNameAndFurigana(
+                          r.name || r.fullName || ""
+                        );
+                        return p.furigana || "-";
+                      })()}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {r.gender || "-"}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {(() => {
+                        const raw = r.birth || r.birthdate || "";
+                        const bp = extractBirthAndAge(raw);
+                        return bp.birth || "-";
+                      })()}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {(() => {
+                        const raw = r.birth || r.birthdate || "";
+                        const bp = extractBirthAndAge(raw);
+                        return bp.age || "-";
+                      })()}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {r.email || "-"}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {r.tel || r.phone || r.mobilenumber || "-"}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {r.addr || "-"}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {r.school || "-"}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {(() => {
+                        // Prefer explicit extracted field. If absent, try to extract a clean 応募No pattern from r.oubo_no
+                        const extracted = r.oubo_no_extracted;
+                        if (extracted) return extracted;
+                        const raw = r.oubo_no || "";
+                        if (!raw) return "-";
                         try {
-                          const s = String(r.status || "");
-                          if (s === "target_out") return "対象外";
+                          // Match patterns like A2-3616-7244 or 123-456-789 or alphanum groups separated by - (at least one dash)
+                          const m = String(raw).match(
+                            /[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/
+                          );
+                          if (m && m[0]) return m[0];
                         } catch (e) {
                           /* ignore */
                         }
-                        // If status is a numeric string or number, show as-is
-                        return String(r.status);
-                      }
-
-                      // Else try response.status_code
-                      try {
-                        if (
-                          typeof r.response === "object" &&
-                          r.response !== null
-                        ) {
-                          const sc =
-                            r.response.status_code ||
-                            r.response.status ||
-                            r.response.code;
-                          if (sc !== undefined && sc !== null && sc !== "")
-                            return String(sc);
+                        // fallback to raw value
+                        return raw;
+                      })()}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {(() => {
+                        const v =
+                          r.sentAt ||
+                          r.sent_at ||
+                          r.sent_at_seconds ||
+                          r.sent_at_ts;
+                        if (!v && v !== 0) return "-";
+                        try {
+                          // ensure numeric seconds
+                          const s = Number(v);
+                          if (!isFinite(s)) return "-";
+                          const d = new Date(s * 1000);
+                          // JST display
+                          const opts: any = { timeZone: "Asia/Tokyo" };
+                          const y = d.getFullYear();
+                          const m = String(d.getMonth() + 1).padStart(2, "0");
+                          const day = String(d.getDate()).padStart(2, "0");
+                          const hh = String(d.getHours()).padStart(2, "0");
+                          const mm = String(d.getMinutes()).padStart(2, "0");
+                          const ss = String(d.getSeconds()).padStart(2, "0");
+                          return `${y}/${m}/${day} ${hh}:${mm}:${ss}`;
+                        } catch (e) {
+                          return "-";
                         }
-                        // fallback: if response is primitive, show it
-                        if (
-                          typeof r.response === "string" ||
-                          typeof r.response === "number"
-                        )
-                          return String(r.response);
-                      } catch (e) {
-                        // ignore
-                      }
+                      })()}
+                    </td>
+                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                      {(() => {
+                        // If not a send target: show 対象外
+                        const hasStatus =
+                          r.status !== undefined &&
+                          r.status !== null &&
+                          r.status !== "";
+                        const hasResponse =
+                          r.response !== undefined && r.response !== null;
+                        // If neither status nor response => considered non-target (対象外)
+                        if (!hasStatus && !hasResponse) return "対象外";
 
-                      return "-";
-                    })()}
-                  </td>
-                </tr>
-              ))}
+                        // Prefer numeric/status field if present
+                        if (hasStatus) {
+                          // If explicitly marked as target_out, show 【対象外】 instead of raw status
+                          try {
+                            const s = String(r.status || "");
+                            if (s === "target_out") return "対象外";
+                          } catch (e) {
+                            /* ignore */
+                          }
+                          // If status is a numeric string or number, show as-is
+                          return String(r.status);
+                        }
+
+                        // Else try response.status_code
+                        try {
+                          if (
+                            typeof r.response === "object" &&
+                            r.response !== null
+                          ) {
+                            const sc =
+                              r.response.status_code ||
+                              r.response.status ||
+                              r.response.code;
+                            if (sc !== undefined && sc !== null && sc !== "")
+                              return String(sc);
+                          }
+                          // fallback: if response is primitive, show it
+                          if (
+                            typeof r.response === "string" ||
+                            typeof r.response === "number"
+                          )
+                            return String(r.response);
+                        } catch (e) {
+                          // ignore
+                        }
+
+                        return "-";
+                      })()}
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
           {/* pagination controls */}
@@ -636,14 +638,14 @@ export default function HistoryPage() {
                 className="btn"
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0}
-                style={{ padding: '8px 12px' }}
+                style={{ padding: "8px 12px" }}
               >
                 前へ
               </button>
 
               {/* page jump input */}
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <label style={{ color: '#666', fontSize: 13 }}>第</label>
+                <label style={{ color: "#666", fontSize: 13 }}>第</label>
                 <input
                   type="number"
                   min={1}
@@ -653,23 +655,40 @@ export default function HistoryPage() {
                     if (e.key === "Enter") {
                       const n = Number(pageInput);
                       if (!isFinite(n)) return;
-                      const total = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+                      const total = Math.max(
+                        1,
+                        Math.ceil(rows.length / PAGE_SIZE)
+                      );
                       const p = Math.max(0, Math.min(total - 1, n - 1));
                       setPage(p);
                     }
                   }}
-                  style={{ width: 64, padding: '6px 8px', fontSize: 14, borderRadius: 6, border: '1px solid #ccc' }}
+                  style={{
+                    width: 64,
+                    padding: "6px 8px",
+                    fontSize: 14,
+                    borderRadius: 6,
+                    border: "1px solid #ccc",
+                  }}
                 />
                 <button
                   className="btn"
                   onClick={() => {
                     const n = Number(pageInput);
                     if (!isFinite(n)) return;
-                    const total = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+                    const total = Math.max(
+                      1,
+                      Math.ceil(rows.length / PAGE_SIZE)
+                    );
                     const p = Math.max(0, Math.min(total - 1, n - 1));
                     setPage(p);
                   }}
-                  style={{ padding: '8px 12px', display: 'inline-flex', whiteSpace: 'nowrap', alignItems: 'center' }}
+                  style={{
+                    padding: "8px 12px",
+                    display: "inline-flex",
+                    whiteSpace: "nowrap",
+                    alignItems: "center",
+                  }}
                 >
                   移動
                 </button>
@@ -684,14 +703,15 @@ export default function HistoryPage() {
                   )
                 }
                 disabled={page >= Math.floor((rows.length - 1) / PAGE_SIZE)}
-                style={{ padding: '8px 12px' }}
+                style={{ padding: "8px 12px" }}
               >
                 次へ
               </button>
             </div>
 
-            <div style={{ color: '#666', fontSize: 13 }}>
-              合計 {rows.length} 件・全 {Math.max(1, Math.ceil(rows.length / PAGE_SIZE))} ページ
+            <div style={{ color: "#666", fontSize: 13 }}>
+              合計 {rows.length} 件・全{" "}
+              {Math.max(1, Math.ceil(rows.length / PAGE_SIZE))} ページ
             </div>
           </div>
         </div>
