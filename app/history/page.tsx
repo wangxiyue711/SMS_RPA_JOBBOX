@@ -33,6 +33,9 @@ async function waitForAuthReady(timeout = 3000): Promise<any | null> {
 
 export default function HistoryPage() {
   const [rows, setRows] = useState<any[]>([]);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 10;
+  const [pageInput, setPageInput] = useState("1");
   const [loading, setLoading] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [serverRows, setServerRows] = useState<any[] | null>(null);
@@ -40,6 +43,11 @@ export default function HistoryPage() {
   useEffect(() => {
     loadHistory();
   }, []);
+
+  // keep pageInput in sync when page or rows change
+  useEffect(() => {
+    setPageInput(String(page + 1));
+  }, [page, rows]);
 
   async function loadHistory() {
     setLoading(true);
@@ -57,6 +65,8 @@ export default function HistoryPage() {
         out.push({ id: d.id, ...(d.data() as any) });
       });
       setRows(out);
+      // reset page to first when new data is loaded
+      setPage(0);
     } catch (e) {
       console.error("loadHistory error", e);
       setRows([]);
@@ -451,12 +461,15 @@ export default function HistoryPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, idx) => (
+              {rows
+                .slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
+                .map((r, idx) => (
                 <tr
                   key={r.id}
                   style={{
                     borderBottom: "1px solid #eee",
-                    background: idx % 2 === 0 ? "#ffffff" : "#fbfcfd",
+                    background:
+                      (page * PAGE_SIZE + idx) % 2 === 0 ? "#ffffff" : "#fbfcfd",
                     transition: "background 120ms ease",
                   }}
                 >
@@ -607,6 +620,80 @@ export default function HistoryPage() {
               ))}
             </tbody>
           </table>
+          {/* pagination controls */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              marginTop: 18,
+              gap: 10,
+            }}
+          >
+            <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+              <button
+                className="btn"
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+                style={{ padding: '8px 12px' }}
+              >
+                前へ
+              </button>
+
+              {/* page jump input */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <label style={{ color: '#666', fontSize: 13 }}>第</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={pageInput}
+                  onChange={(e) => setPageInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const n = Number(pageInput);
+                      if (!isFinite(n)) return;
+                      const total = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+                      const p = Math.max(0, Math.min(total - 1, n - 1));
+                      setPage(p);
+                    }
+                  }}
+                  style={{ width: 64, padding: '6px 8px', fontSize: 14, borderRadius: 6, border: '1px solid #ccc' }}
+                />
+                <button
+                  className="btn"
+                  onClick={() => {
+                    const n = Number(pageInput);
+                    if (!isFinite(n)) return;
+                    const total = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+                    const p = Math.max(0, Math.min(total - 1, n - 1));
+                    setPage(p);
+                  }}
+                  style={{ padding: '8px 12px', display: 'inline-flex', whiteSpace: 'nowrap', alignItems: 'center' }}
+                >
+                  移動
+                </button>
+                {/* removed 'ページ' label for a cleaner layout */}
+              </div>
+
+              <button
+                className="btn"
+                onClick={() =>
+                  setPage((p) =>
+                    Math.min(p + 1, Math.floor((rows.length - 1) / PAGE_SIZE))
+                  )
+                }
+                disabled={page >= Math.floor((rows.length - 1) / PAGE_SIZE)}
+                style={{ padding: '8px 12px' }}
+              >
+                次へ
+              </button>
+            </div>
+
+            <div style={{ color: '#666', fontSize: 13 }}>
+              合計 {rows.length} 件・全 {Math.max(1, Math.ceil(rows.length / PAGE_SIZE))} ページ
+            </div>
+          </div>
         </div>
       )}
 
