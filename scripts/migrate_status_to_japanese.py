@@ -87,6 +87,41 @@ def list_sms_history_docs(project: str, token: str, uid: Optional[str] = None):
         return []
 
 
+def list_all_account_uids(project: str, token: str):
+    """List top-level account document names and return list of UIDs (document IDs)."""
+    base = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents'
+    url = f"{base}/accounts"
+    headers = {'Authorization': f'Bearer {token}'}
+    uids = []
+    try:
+        page_token = None
+        while True:
+            params = {'pageSize': 200}
+            if page_token:
+                params['pageToken'] = page_token
+            r = requests.get(url, headers=headers, params=params, timeout=20)
+            if r.status_code != 200:
+                print('Failed to list accounts:', r.status_code, r.text[:300])
+                break
+            data = r.json()
+            docs = data.get('documents', [])
+            for d in docs:
+                name = d.get('name')
+                # name format: projects/{project}/databases/(default)/documents/accounts/{uid}
+                if name:
+                    parts = name.split('/')
+                    if len(parts) >= 1:
+                        uid = parts[-1]
+                        uids.append(uid)
+            page_token = data.get('nextPageToken')
+            if not page_token:
+                break
+        return uids
+    except Exception as e:
+        print('Error listing accounts:', e)
+        return []
+
+
 def doc_status_field(doc: dict):
     try:
         fields = doc.get('fields', {})
@@ -114,7 +149,9 @@ def update_doc_status(project: str, token: str, uid: str, doc_name: str, new_sta
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--uid', help='Account UID to migrate (required)', required=True)
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument('--uid', help='Account UID to migrate')
+    group.add_argument('--all', action='store_true', help='Migrate all accounts in the project')
     p.add_argument('--dry-run', action='store_true', default=True, help='List documents only')
     p.add_argument('--apply', action='store_true', help='Actually apply changes')
     args = p.parse_args()
@@ -130,36 +167,88 @@ def main():
     project = tok['project']
     print('Using project', project)
 
-    docs = list_sms_history_docs(project, token, uid=args.uid)
-    if not docs:
-        print('No documents found or failed to list.')
-        return
+    # build list of accounts to process
+    if args.all:
+        print('Listing all accounts...')
+        accounts_to_process = list_all_account_uids(project, token)
+        if not accounts_to_process:
+            print('No accounts found or failed to list accounts.')
+            return
+    else:
+        accounts_to_process = [args.uid]
 
     to_update = []
-    for d in docs:
-        st = doc_status_field(d)
-        if st == 'sent':
-            to_update.append(d)
+    # Iterate accounts and collect docs to update
+    for uid in accounts_to_process:
+        print('Scanning sms_history for account', uid)
+        docs = list_sms_history_docs(project, token, uid=uid)
+        if not docs:
+            print('  No documents found or failed to list for', uid)
+            continue
+        # Decide mapping per-document to one of: 送信済, 送信失敗, 対象外
+        for d in docs:
+            st = doc_status_field(d)
+            # extract response.status_code if present
+            resp_code = None
+            try:
+                fields = d.get('fields', {})
+                resp = fields.get('response', {})
+                # response might be a mapValue with nested fields
+                if resp and resp.get('mapValue') and resp.get('mapValue').get('fields'):
+                    rf = resp.get('mapValue').get('fields')
+                    if 'status_code' in rf:
+                        resp_code = int(rf.get('status_code', {}).get('integerValue') or rf.get('status_code', {}).get('stringValue'))
+                else:
+                    # sometimes response is stored as stringValue containing a dict-like repr; skip
+                    pass
+            except Exception:
+                resp_code = None
 
-    print(f'Found {len(to_update)} documents with status=="sent" under account {args.uid}.')
+            new_status = None
+            # If original status is 'sent', and response code is 200 (or resp_code is None but status is 'sent'), treat as success
+            if st == 'sent' and (resp_code is None or resp_code == 200):
+                new_status = '送信済'
+            elif st == 'target_out':
+                new_status = '対象外'
+            else:
+                # everything else considered send-failure (including invalid_phone, no_tel_or_template, explicit non-200 sent)
+                new_status = '送信失敗'
+
+            # Only queue if different from current (avoid unnecessary writes)
+            if new_status and new_status != st:
+                # attach new_status for reporting
+                d['_new_status'] = new_status
+                d['_uid_for_update'] = uid
+                to_update.append(d)
+
+    print(f'Planned updates: {len(to_update)} documents will be changed.')
     for d in to_update:
         name = d.get('name')
         fields = d.get('fields', {})
-        tel = fields.get('tel', {}).get('stringValue')
-        sentAt = fields.get('sentAt', {}).get('integerValue') or fields.get('sentAt', {}).get('timestampValue')
-        print('-', name, 'tel=', tel, 'sentAt=', sentAt)
+        tel = fields.get('tel', {}).get('stringValue') if fields.get('tel') else None
+        sentAt = None
+        if fields.get('sentAt'):
+            sentAt = fields.get('sentAt').get('integerValue') or fields.get('sentAt').get('timestampValue')
+        orig = doc_status_field(d)
+        new = d.get('_new_status')
+        uid_for = d.get('_uid_for_update')
+        print('-', uid_for, name, 'tel=', tel, 'sentAt=', sentAt, '->', orig, '=>', new)
 
     if args.apply:
         print('Applying updates...')
         success = 0
         for d in to_update:
-            name = d.get('name')
-            uid = args.uid
-            if update_doc_status(project, token, uid, name, '送信済'):
+            doc_name = d.get('name')
+            uid = d.get('_uid_for_update')
+            new = d.get('_new_status')
+            if not doc_name or not uid:
+                print('Skipping doc with missing identifier')
+                continue
+            if update_doc_status(project, token, uid, doc_name, new):
                 success += 1
         print(f'Updated {success}/{len(to_update)} documents.')
     else:
-        print('Dry-run mode. No changes applied.')
+        print('Dry-run mode. No changes applied. Run with --apply to perform updates.')
 
 
 if __name__ == '__main__':

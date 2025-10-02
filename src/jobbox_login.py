@@ -3,7 +3,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait as WW
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
-import json, time, os, re, unicodedata
+import json, time, os, re, unicodedata, datetime
 from selenium.webdriver.common.keys import Keys
 
 CONFIG_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'config', 'accounts.json'))
@@ -432,11 +432,66 @@ return 'NOT_FOUND';
             if not el:
                 raise Exception('未能定位到メモ入力欄')
 
+            # Read existing content (support textarea/input/value and contenteditable)
+            existing = ''
             try:
-                el.clear()
-            except: pass
-            el.click()
-            el.send_keys(memo_text)
+                tag = el.tag_name.lower()
+                if tag in ('textarea', 'input'):
+                    try:
+                        existing = el.get_attribute('value') or ''
+                    except Exception:
+                        existing = ''
+                else:
+                    try:
+                        existing = el.get_attribute('textContent') or el.text or ''
+                    except Exception:
+                        existing = el.text or ''
+            except Exception:
+                existing = ''
+
+            # Normalize and decide whether to append
+            new_entry = memo_text.strip()
+            # Append a timestamp to the entry, format: （YYYY/MM/DD，HH：MM） with full-width punctuation
+            try:
+                now = datetime.datetime.now()
+                date_part = now.strftime('%Y/%m/%d')
+                time_part = now.strftime('%H:%M').replace(':', '：')
+                ts_suffix = f'（{date_part}，{time_part}）'
+            except Exception:
+                ts_suffix = ''
+            new_entry_ts = f"{new_entry}{ts_suffix}" if ts_suffix else new_entry
+            sep = '\n'
+            combined = ''
+            # If the bare entry (without timestamp) already exists in the memo, avoid duplicate appending
+            if existing and new_entry in existing:
+                combined = existing
+            else:
+                if existing:
+                    combined = existing.rstrip() + sep + new_entry_ts
+                else:
+                    combined = new_entry_ts
+
+            # Attempt to set combined content
+            try:
+                # Clear and send combined content for inputs/textarea
+                try:
+                    el.clear()
+                except Exception:
+                    pass
+                el.click()
+                # Use send_keys for robustness; if contenteditable, we can set via JS as fallback
+                try:
+                    el.send_keys(combined)
+                except Exception:
+                    try:
+                        self.driver.execute_script("arguments[0].innerText = arguments[1];", el, combined)
+                    except Exception:
+                        try:
+                            self.driver.execute_script("arguments[0].value = arguments[1];", el, combined)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
             # 查找并点击「選考情報を更新する」按钮（支持按钮、input[type=submit]、a）
             btn_xps = [

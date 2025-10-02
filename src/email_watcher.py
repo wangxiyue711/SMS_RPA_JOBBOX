@@ -6,7 +6,11 @@ import getpass
 import sys
 import os
 from email.header import decode_header
+import smtplib
+from email.message import EmailMessage
 import requests
+import json
+import base64
 
 
 def prompt_input(prompt, default=None):
@@ -154,9 +158,16 @@ def get_api_settings(uid):
     sa_file = None
     for c in sa_candidates:
         if os.path.isfile(c):
-            sa_file = c; break
+            sa_file = c
+            break
     if not sa_file:
-        return {}
+        # fallback to envs only
+        return {
+            'provider': os.environ.get('SMS_PROVIDER') or os.environ.get('API_PROVIDER'),
+            'baseUrl': os.environ.get('SMS_PUBLISHER_BASEURL') or os.environ.get('API_BASEURL'),
+            'apiId': os.environ.get('SMS_PUBLISHER_APIID') or os.environ.get('API_ID'),
+            'apiPass': os.environ.get('SMS_PUBLISHER_APIPASS') or os.environ.get('SMS_PUBLISHER_TOKEN') or os.environ.get('API_PASS')
+        }
     try:
         import json
         from google.oauth2 import service_account
@@ -167,12 +178,17 @@ def get_api_settings(uid):
         creds.refresh(Request())
         token = creds.token
     except Exception:
-        return {}
+        # can't read service account -> fallback to envs
+        return {
+            'provider': os.environ.get('SMS_PROVIDER') or os.environ.get('API_PROVIDER'),
+            'baseUrl': os.environ.get('SMS_PUBLISHER_BASEURL') or os.environ.get('API_BASEURL'),
+            'apiId': os.environ.get('SMS_PUBLISHER_APIID') or os.environ.get('API_ID'),
+            'apiPass': os.environ.get('SMS_PUBLISHER_APIPASS') or os.environ.get('SMS_PUBLISHER_TOKEN') or os.environ.get('API_PASS')
+        }
     project = sa.get('project_id')
     if not project:
         return {}
     url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/api_settings/settings'
-    import requests
     headers = {'Authorization': f'Bearer {token}'}
     try:
         r = requests.get(url, headers=headers, timeout=10)
@@ -193,7 +209,6 @@ def get_api_settings(uid):
         if not res.get('apiId'):
             res['apiId'] = os.environ.get('SMS_PUBLISHER_APIID') or os.environ.get('API_ID')
         if not res.get('apiPass'):
-            # some setups call it API pass or token
             res['apiPass'] = os.environ.get('SMS_PUBLISHER_APIPASS') or os.environ.get('SMS_PUBLISHER_TOKEN') or os.environ.get('API_PASS')
         return res
     except Exception:
@@ -205,6 +220,90 @@ def get_api_settings(uid):
             'apiPass': os.environ.get('SMS_PUBLISHER_APIPASS') or os.environ.get('SMS_PUBLISHER_TOKEN') or os.environ.get('API_PASS')
         }
         return fallback
+
+def pick_and_rotate_template(uid):
+    """Module-level helper: decide A/B and best-effort update nextSmsTemplate in Firestore.
+
+    Returns chosen 'A' or 'B'.
+    """
+    sa_candidates = [
+        os.path.join(os.getcwd(), 'service-account'),
+        os.path.join(os.path.dirname(__file__), '..', 'service-account'),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'service-account'),
+        os.path.join(os.getcwd(), 'src', 'service-account'),
+    ]
+    sa_file = None
+    for c in sa_candidates:
+        if os.path.isfile(c):
+            sa_file = c; break
+    if not sa_file:
+        return 'A'  # fallback
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        with open(sa_file, 'r', encoding='utf-8') as f:
+            sa = json.load(f)
+        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+        creds.refresh(Request())
+        token = creds.token
+    except Exception:
+        return 'A'
+    project = sa.get('project_id')
+    if not project:
+        return 'A'
+
+    doc_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/target_settings/settings'
+    headers = {'Authorization': f'Bearer {token}'}
+    try:
+        r = requests.get(doc_url, headers=headers, timeout=8)
+        if r.status_code != 200:
+            return 'A'
+        data = r.json()
+        fields = data.get('fields', {})
+        useA = True if (not fields.get('smsUseA')) else (fields.get('smsUseA', {}).get('booleanValue') is True)
+        useB = True if (not fields.get('smsUseB')) else (fields.get('smsUseB', {}).get('booleanValue') is True)
+        next_t = 'A'
+        if fields.get('nextSmsTemplate') and fields.get('nextSmsTemplate').get('stringValue'):
+            next_t = fields.get('nextSmsTemplate').get('stringValue')
+
+        # Decide chosen and next
+        if next_t == 'A' and useA:
+            chosen = 'A'
+            new_next = 'B' if useB else 'A'
+        elif next_t == 'B' and useB:
+            chosen = 'B'
+            new_next = 'A' if useA else 'B'
+        else:
+            # fallback: pick A if available else B
+            if useA:
+                chosen = 'A'
+                new_next = 'B' if useB else 'A'
+            elif useB:
+                chosen = 'B'
+                new_next = 'A'
+            else:
+                # none enabled -> default A
+                return 'A'
+
+        # write back new_next (best-effort)
+        patch_body = {'fields': {'nextSmsTemplate': {'stringValue': new_next}}}
+        # PATCH to the document path
+        try:
+            # Use updateMask to update only the nextSmsTemplate field to avoid
+            # replacing the whole document (which would clear other fields).
+            r2 = requests.patch(
+                doc_url,
+                params={'updateMask.fieldPaths': 'nextSmsTemplate'},
+                headers={**headers, 'Content-Type': 'application/json'},
+                json=patch_body,
+                timeout=8,
+            )
+            # ignore result; best-effort
+        except Exception:
+            pass
+        return chosen
+    except Exception:
+        return 'A'
 
 
 def _find_service_account_file():
@@ -218,6 +317,217 @@ def _find_service_account_file():
         if os.path.isfile(c):
             return c
     return None
+
+
+def _get_mail_settings(uid: str) -> dict:
+    """Read accounts/{uid}/mail_settings/settings from Firestore using service account file."""
+    sa_file = _find_service_account_file()
+    if not sa_file:
+        return {}
+    try:
+        import json
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        with open(sa_file, 'r', encoding='utf-8') as f:
+            sa = json.load(f)
+        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+        creds.refresh(Request())
+        token = creds.token
+    except Exception:
+        return {}
+    # proceed to read the mail_settings document
+    project = sa.get('project_id') if isinstance(sa, dict) else None
+    if not project:
+        return {}
+    url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/mail_settings/settings'
+    headers = {'Authorization': f'Bearer {token}'}
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return {}
+        data = r.json()
+        fields = data.get('fields', {})
+        res = {}
+        if 'email' in fields:
+            res['email'] = fields.get('email', {}).get('stringValue')
+        if 'appPass' in fields:
+            res['appPass'] = fields.get('appPass', {}).get('stringValue')
+        return res
+    except Exception:
+        return {}
+
+
+def send_mail_once(from_addr, app_pass, to_addr, subject, body):
+    """Send a single email using SMTP SSL (Gmail compatible).
+
+    from_addr: full email address used as sender
+    app_pass: 16-char app password
+    to_addr: recipient email
+    subject/body: strings
+    Returns (success, info_dict)
+    """
+    if not to_addr:
+        return (False, {'note': 'no recipient'})
+    if not from_addr or not app_pass:
+        return (False, {'note': 'missing sender credentials'})
+    dry = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
+    if dry:
+        print(f"[DRY_RUN_MAIL] would send mail from={from_addr} to={to_addr} subj={subject}")
+        return (True, {'note': 'dry_run'})
+    try:
+        from email.header import Header
+        from email.utils import parseaddr, formataddr
+        msg = EmailMessage()
+
+        # Helper: attempt to extract a pure ASCII addr-spec; fallback to regex
+        def _extract_addr(addr):
+            a = str(addr or '')
+            name, email_addr = parseaddr(a)
+            # If parseaddr gave an ASCII addr-spec, accept it
+            if email_addr and all(ord(c) < 128 for c in email_addr):
+                return (name or '', email_addr)
+            # fallback: find ascii-like addr via regex
+            m = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", a)
+            if m:
+                return (name or '', m.group(0))
+            # nothing usable
+            return (name or '', '')
+
+        # Parse and build headers with UTF-8 display names
+        from_name, from_email = _extract_addr(from_addr)
+        to_name, to_email = _extract_addr(to_addr)
+
+        debug = os.environ.get('DEBUG_MAIL', 'false').lower() in ('1', 'true', 'yes')
+        if debug:
+            print(f"[DEBUG_MAIL] parsed from_name={repr(from_name)} from_email={repr(from_email)}")
+            print(f"[DEBUG_MAIL] parsed to_name={repr(to_name)} to_email={repr(to_email)}")
+
+        # If we couldn't extract a pure ascii addr-spec for envelope, fail clearly
+        if not from_email or not to_email:
+            return (False, {'error': 'invalid_envelope_address', 'from_raw': str(from_addr), 'to_raw': str(to_addr), 'note': 'failed to extract ASCII addr-spec for SMTP envelope'})
+
+        # Header values: allow non-ASCII display names
+        from_header = formataddr((str(Header(from_name or '', 'utf-8')), from_email))
+        to_header = formataddr((str(Header(to_name or '', 'utf-8')), to_email))
+        msg['From'] = from_header
+        msg['To'] = to_header
+        # Ensure UTF-8 safe subject and body for Japanese text
+        msg['Subject'] = str(Header(subject or '', 'utf-8'))
+        msg.set_content(body or '', charset='utf-8')
+        # Use Gmail SMTP by default
+        smtp_host = os.environ.get('EMAIL_SMTP_HOST', 'smtp.gmail.com')
+        smtp_port = int(os.environ.get('EMAIL_SMTP_PORT', '465'))
+        debug = os.environ.get('DEBUG_MAIL', 'false').lower() in ('1', 'true', 'yes')
+        if debug:
+            print(f"[DEBUG_MAIL] connecting SMTP_SSL host={smtp_host} port={smtp_port}")
+        # Ensure local_hostname used for EHLO/HELO is ASCII-only to avoid
+        # smtplib attempting to encode a non-ASCII hostname with ascii codec.
+        try:
+            import socket
+            lh = os.environ.get('EMAIL_SMTP_LOCALHOST') or socket.getfqdn()
+            # if contains non-ascii, fall back
+            try:
+                lh.encode('ascii')
+            except Exception:
+                lh = 'localhost'
+        except Exception:
+            lh = 'localhost'
+
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20, local_hostname=lh) as s:
+            if debug:
+                print(f"[DEBUG_MAIL] login as {from_email}")
+            s.login(from_email, app_pass)
+            # Envelope addresses must be ASCII addr-specs; use parsed emails
+            if debug:
+                print(f"[DEBUG_MAIL] send_message envelope from={from_email} to={to_email}")
+            s.send_message(msg, from_addr=from_email, to_addrs=[to_email])
+        return (True, {'note': 'sent'})
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        return (False, {'error': str(e), 'traceback': tb})
+
+
+def send_auto_reply_if_configured(uid, ts, is_target, detail, jb=None):
+    """If target settings request auto-reply, send mail to candidate.
+
+    This helper can be called for both target and non-target candidates.
+    """
+    try:
+        mail_cfg = ts or {}
+    except Exception:
+        mail_cfg = {}
+    auto = bool(mail_cfg.get('autoReply'))
+    debug = os.environ.get('DEBUG_MAIL', 'false').lower() in ('1', 'true', 'yes')
+    if not auto:
+        if debug:
+            print('[DEBUG_MAIL] autoReply is disabled -> skip sending')
+        return (False, False, {'note': 'autoReply disabled'})
+
+    # Accept multiple possible keys for email address
+    to_email = (
+        detail.get('email')
+        or detail.get('メール')
+        or detail.get('メールアドレス')
+        or detail.get('mail')
+        or detail.get('Mail')
+        or detail.get('emailAddress')
+        or detail.get('Email')
+        or ''
+    )
+    should_send = False
+    if is_target and mail_cfg.get('mailUseTarget', True):
+        should_send = True
+    if (not is_target) and mail_cfg.get('mailUseNonTarget', False):
+        should_send = True
+    if not should_send:
+        if debug:
+            print(f"[DEBUG_MAIL] should_send=false (is_target={is_target}, mailUseTarget={mail_cfg.get('mailUseTarget', True)}, mailUseNonTarget={mail_cfg.get('mailUseNonTarget', False)}) -> skip")
+        return (False, False, {'note': 'send suppressed by mailUseTarget/mailUseNonTarget'})
+    if not to_email:
+        msg = 'メール送信を要求されていますが、送信先メールアドレスがありません。スキップします。'
+        if debug:
+            print('[DEBUG_MAIL]', msg)
+        else:
+            print(msg)
+        return (False, False, {'error': 'missing recipient'})
+
+    subj = mail_cfg.get('mailSubjectA') if is_target else mail_cfg.get('mailSubjectB')
+    body = mail_cfg.get('mailTemplateA') if is_target else mail_cfg.get('mailTemplateB')
+
+    # get sender creds from env or cloud
+    mail_settings = _get_mail_settings(uid) if uid else {}
+    sender = os.environ.get('EMAIL_WATCHER_ADDR') or mail_settings.get('email')
+    sender_pass = os.environ.get('EMAIL_WATCHER_PASS') or mail_settings.get('appPass')
+    if not sender:
+        msg = '送信元メールアドレスが見つかりません。メール送信をスキップします。'
+        if debug:
+            print('[DEBUG_MAIL]', msg)
+        else:
+            print(msg)
+        return (False, False, {'error': 'missing sender'})
+
+    mail_dry = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
+    if mail_dry:
+        print(f"[DRY_RUN_MAIL] would send mail from={sender} to={to_email} subj={subj}")
+        if debug:
+            print('[DEBUG_MAIL] DRY_RUN_MAIL is enabled -> no real send')
+        # Treat dry-run as not actually attempted so callers don't treat it as a real send
+        return (False, False, {'note': 'dry_run'})
+
+    ok_mail, info_mail = send_mail_once(sender, sender_pass, to_email, subj or '', body or '')
+    if ok_mail:
+        print(f"メール送信成功: to={to_email}")
+        try:
+            # NOTE: remove direct memo write here to avoid duplicate memo lines.
+            # The caller will construct a mail_note and call jb.set_memo_and_save once.
+            pass
+        except Exception:
+            pass
+        return (True, True, info_mail if isinstance(info_mail, dict) else {'note': str(info_mail)})
+    else:
+        print(f"メール送信失敗: to={to_email} info={info_mail}")
+        return (True, False, info_mail if isinstance(info_mail, dict) else {'note': str(info_mail)})
 
 
 def _make_fields_for_firestore(doc: dict) -> dict:
@@ -246,6 +556,65 @@ def write_sms_history(uid: str, doc: dict) -> bool:
     if not sa_file:
         print('service-account file not found; cannot write history')
         return False
+    # Duplicate-send guard: if a recent sms_history with same oubo_no and tel and status 'sent'
+    # exists within a short time window, skip writing to avoid duplicates.
+    try:
+        try:
+            with open(sa_file, 'r', encoding='utf-8') as f:
+                sa = json.load(f) # type: ignore
+        except Exception:
+            sa = None
+        if sa and uid and doc:
+            project = sa.get('project_id')
+            if project:
+                # prepare a structuredQuery to find recent matching records
+                oubo = doc.get('oubo_no') or ''
+                tel = doc.get('tel') or ''
+                now_ts = int(time.time())
+                recent_threshold = 120  # seconds
+                body = {
+                    "structuredQuery": {
+                        "from": [{"collectionId": "sms_history"}],
+                        "where": {
+                            "compositeFilter": {
+                                "op": "AND",
+                                "filters": [
+                                    {"fieldFilter": {"field": {"fieldPath": "oubo_no"}, "op": "EQUAL", "value": {"stringValue": str(oubo)}}},
+                                    {"fieldFilter": {"field": {"fieldPath": "tel"}, "op": "EQUAL", "value": {"stringValue": str(tel)}}},
+                                    {"fieldFilter": {"field": {"fieldPath": "status"}, "op": "EQUAL", "value": {"stringValue": "送信済"}}},
+                                    {"fieldFilter": {"field": {"fieldPath": "sentAt"}, "op": "GREATER_THAN", "value": {"integerValue": str(now_ts - recent_threshold)}}}
+                                ]
+                            }
+                        },
+                        "limit": 1
+                    }
+                }
+                # get short-lived token
+                try:
+                    from google.oauth2 import service_account
+                    from google.auth.transport.requests import Request
+                    creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+                    creds.refresh(Request())
+                    token = creds.token
+                    run_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents:runQuery'
+                    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+                    r = requests.post(run_url, headers=headers, json=body, timeout=8)
+                    if r.status_code == 200:
+                        try:
+                            results = r.json()
+                            if isinstance(results, list) and len(results) > 0:
+                                # if any document matched, consider duplicate
+                                # Each result entry may be an object with document key when matched
+                                for entry in results:
+                                    if entry and entry.get('document'):
+                                        print('Detected recent duplicate sms_history entry; skipping write')
+                                        return True
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+    except Exception:
+        pass
     try:
         import json
         from google.oauth2 import service_account
@@ -533,6 +902,14 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                     }
                                                 res['smsTemplateA'] = fields.get('smsTemplateA', {}).get('stringValue')
                                                 res['smsTemplateB'] = fields.get('smsTemplateB', {}).get('stringValue')
+                                                # mail related fields
+                                                res['autoReply'] = fields.get('autoReply', {}).get('booleanValue') if fields.get('autoReply') is not None else False
+                                                res['mailUseTarget'] = fields.get('mailUseTarget', {}).get('booleanValue') if fields.get('mailUseTarget') is not None else True
+                                                res['mailUseNonTarget'] = fields.get('mailUseNonTarget', {}).get('booleanValue') if fields.get('mailUseNonTarget') is not None else False
+                                                res['mailTemplateA'] = fields.get('mailTemplateA', {}).get('stringValue') if fields.get('mailTemplateA') else None
+                                                res['mailTemplateB'] = fields.get('mailTemplateB', {}).get('stringValue') if fields.get('mailTemplateB') else None
+                                                res['mailSubjectA'] = fields.get('mailSubjectA', {}).get('stringValue') if fields.get('mailSubjectA') else None
+                                                res['mailSubjectB'] = fields.get('mailSubjectB', {}).get('stringValue') if fields.get('mailSubjectB') else None
                                                 return res
                                             except Exception:
                                                 return {}
@@ -777,7 +1154,22 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 return (True, {'note': 'logged'})
 
                                             tel = detail.get('tel') or detail.get('電話番号') or ''
-                                            tpl = ts.get('smsTemplateA') if ts.get('smsTemplateA') else ts.get('smsTemplateB')
+                                            # Decide template: respect target settings smsUseA/smsUseB and rotate when both enabled
+                                            def pick_template_for_send(uid, ts):
+                                                useA = True if ts.get('smsTemplateA') else False
+                                                useB = True if ts.get('smsTemplateB') else False
+                                                # If both templates exist, use rotation helper
+                                                if useA and useB:
+                                                    chosen = pick_and_rotate_template(uid)
+                                                    return chosen, ts.get('smsTemplateA') if chosen == 'A' else ts.get('smsTemplateB')
+                                                # only one available
+                                                if useA:
+                                                    return 'A', ts.get('smsTemplateA')
+                                                if useB:
+                                                    return 'B', ts.get('smsTemplateB')
+                                                return None, None
+
+                                            chosen_type, tpl = pick_template_for_send(uid, ts)
                                             if tel and tpl:
                                                 norm, ok, reason = normalize_phone_number(tel)
                                                 dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
@@ -795,7 +1187,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'addr': detail.get('addr'),
                                                                 'school': detail.get('school'),
                                                                 'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
-                                                                'status': 'invalid_phone',
+                                                                'status': '送信失敗',
                                                                 'response': {'note': f'invalid phone: {reason}'},
                                                                 'sentAt': int(time.time())
                                                             }
@@ -806,9 +1198,22 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             print('Exception when writing sms_history for invalid phone:', e)
                                                 else:
                                                     success, info = send_sms_router(norm, tpl)
-                                                    # Only write history when not dry-run and send succeeded
-                                                    if success and not dry_run_env:
+                                                    # If not dry-run, record history for both success and failure
+                                                    if not dry_run_env and uid:
                                                         try:
+                                                            # determine status_code if available
+                                                            status_code = None
+                                                            if isinstance(info, dict) and 'status_code' in info:
+                                                                try:
+                                                                    sc = info.get('status_code')
+                                                                    if sc is not None:
+                                                                        status_code = int(str(sc))
+                                                                except Exception:
+                                                                    status_code = None
+                                                            if success:
+                                                                rec_status = '送信済'
+                                                            else:
+                                                                rec_status = f"送信失敗{status_code}" if status_code else '送信失敗'
                                                             rec = {
                                                                 'name': detail.get('name'),
                                                                 'gender': detail.get('gender'),
@@ -818,42 +1223,113 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'addr': detail.get('addr'),
                                                                 'school': detail.get('school'),
                                                                 'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
-                                                                'status': 'sent',
+                                                                'status': rec_status,
+                                                                'template': chosen_type,
                                                                 'response': info if isinstance(info, dict) else {'note': str(info)},
                                                                 'sentAt': int(time.time())
                                                             }
-                                                            ok_write = False
-                                                            if uid:
-                                                                try:
-                                                                    ok_write = write_sms_history(str(uid), rec)
-                                                                except Exception:
-                                                                    ok_write = False
-                                                            if not ok_write:
-                                                                print('Failed to write sms_history after send')
-                                                        except Exception as e:
-                                                            print('Exception when writing sms_history:', e)
-                                                    # If target and send succeeded and provider returned HTTP 200, write Jobbox memo
-                                                    try:
-                                                        status_code = None
-                                                        if isinstance(info, dict) and 'status_code' in info:
                                                             try:
-                                                                status_code = int(info.get('status_code'))
+                                                                ok_write = write_sms_history(str(uid), rec)
                                                             except Exception:
-                                                                status_code = None
-                                                    except Exception:
-                                                        status_code = None
-                                                    # Only write memo when candidate is target, send succeeded, exact HTTP 200, and not dry-run
-                                                    if is_target and success and (status_code == 200) and (not dry_run_env):
-                                                        try:
-                                                            jb.set_memo_and_save('RPA:送信済み')
+                                                                ok_write = False
+                                                            if not ok_write:
+                                                                print('Failed to write sms_history after send/failure')
                                                         except Exception as e:
-                                                            print('メモ保存時に例外が発生しました:', e)
+                                                            print('Exception when writing sms_history (result record):', e)
+                                                    # Only write Jobbox memo when candidate is target, send succeeded, exact HTTP 200, and not dry-run
+                                                    if success and not dry_run_env:
+                                                        try:
+                                                            if isinstance(info, dict) and 'status_code' in info:
+                                                                try:
+                                                                    sc = info.get('status_code')
+                                                                    if sc is not None:
+                                                                        status_code = int(str(sc))
+                                                                except Exception:
+                                                                    status_code = None
+                                                        except Exception:
+                                                            status_code = None
+                                                    # Previously: only wrote history on success; now we've recorded both cases
+                                                        try:
+                                                            status_code = None
+                                                            if isinstance(info, dict) and 'status_code' in info:
+                                                                try:
+                                                                    sc = info.get('status_code')
+                                                                    if sc is not None:
+                                                                        status_code = int(str(sc))
+                                                                except Exception:
+                                                                    status_code = None
+                                                        except Exception:
+                                                            status_code = None
+                                                    # Mail auto-reply (for target as well): call and capture result
+                                                    mail_attempted = False
+                                                    mail_ok = False
+                                                    mail_info = {}
+                                                    try:
+                                                        try:
+                                                            mail_attempted, mail_ok, mail_info = send_auto_reply_if_configured(uid, ts, is_target, detail, jb)
+                                                        except Exception as e:
+                                                            mail_attempted, mail_ok, mail_info = (False, False, {'error': str(e)})
+                                                            print('メール送信処理中に例外が発生しました:', e)
+                                                    except Exception:
+                                                        mail_attempted, mail_ok, mail_info = (False, False, {})
+
+                                                    # Append Jobbox memo entries for SMS and MAIL results (do not overwrite)
+                                                    try:
+                                                        # SMS memo: only when candidate is target, and not dry-run
+                                                        if is_target and (not dry_run_env):
+                                                            try:
+                                                                # Build SMS memo text. Include status code when present.
+                                                                sms_note = 'RPA:SMS:送信済み' if success else 'RPA:SMS:送信失敗'
+                                                                if isinstance(info, dict) and info.get('status_code'):
+                                                                    try:
+                                                                        sc = int(info.get('status_code'))
+                                                                        if not success:
+                                                                            sms_note = f"RPA:SMS:送信失敗{sc}"
+                                                                        else:
+                                                                            sms_note = f"RPA:SMS:送信済み({sc})"
+                                                                    except Exception:
+                                                                        pass
+                                                                try:
+                                                                    if jb:
+                                                                        jb.set_memo_and_save(sms_note)
+                                                                except Exception as e:
+                                                                    print('メモ保存(SMS)時に例外が発生しました:', e)
+                                                            except Exception:
+                                                                pass
+
+                                                        # MAIL memo: if mail was attempted (real attempt) and not dry-run, record result
+                                                        if mail_attempted and (not os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')):
+                                                            try:
+                                                                mail_note = 'RPA:メール:送信済み' if mail_ok else 'RPA:メール:送信失敗'
+                                                                # Try to extract a concise note from mail_info
+                                                                info_snip = ''
+                                                                try:
+                                                                    if isinstance(mail_info, dict):
+                                                                        info_snip = mail_info.get('note') or mail_info.get('error') or str(mail_info.get('status_code', ''))
+                                                                        if info_snip and isinstance(info_snip, dict):
+                                                                            info_snip = ''
+                                                                    else:
+                                                                        info_snip = str(mail_info)
+                                                                except Exception:
+                                                                    info_snip = ''
+                                                                if info_snip:
+                                                                    mail_note = f"{mail_note} ({info_snip})"
+                                                                try:
+                                                                    if jb:
+                                                                        jb.set_memo_and_save(mail_note)
+                                                                except Exception as e:
+                                                                    print('メモ保存(MAIL)時に例外が発生しました:', e)
+                                                            except Exception:
+                                                                pass
+                                                    except Exception as e:
+                                                        print('メモ追記処理で例外:', e)
                                             # Ensure jb is closed after processing this match_account
                                             try:
                                                 jb.close()
                                             except Exception:
                                                 pass
-                                            else:
+                                            # If tel or template was missing, record that fact (do not run this when we successfully sent above)
+                                            if not (tel and tpl):
                                                 print('電話番号またはテンプレートが不足しているため、SMSは送信されませんでした。')
                                                 dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
                                                 if not dry_run_env and uid:
@@ -867,7 +1343,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'addr': detail.get('addr'),
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
-                                                            'status': 'no_tel_or_template',
+                                                            'status': '送信失敗',
                                                             'response': {'note': 'missing tel or template'},
                                                             'sentAt': int(time.time())
                                                         }
@@ -879,6 +1355,11 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                         else:
                                             print('この応募者は SMS の対象外です。')
                                             dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
+                                            # Mail auto-reply for non-target (if configured)
+                                            try:
+                                                send_auto_reply_if_configured(uid, ts, False, detail, jb)
+                                            except Exception as e:
+                                                print('メール送信処理中に例外が発生しました(対象外):', e)
                                             if not dry_run_env and uid:
                                                 try:
                                                     rec = {
@@ -890,7 +1371,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         'addr': detail.get('addr'),
                                                         'school': detail.get('school'),
                                                         'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
-                                                        'status': 'target_out',
+                                                        'status': '対象外',
                                                         'response': {'note': 'evaluated as not target'},
                                                         'sentAt': int(time.time())
                                                     }
@@ -1014,7 +1495,7 @@ if __name__ == '__main__':
     main()
 
 
-def send_sms_once(uid, to_number, template_type='A', live=False):
+def send_sms_once(uid, to_number, template_type=None, live=False):
     """Send a single SMS using account uid. Returns (success, info).
 
     template_type: 'A' or 'B'
@@ -1071,9 +1552,74 @@ def send_sms_once(uid, to_number, template_type='A', live=False):
         except Exception:
             return {}
 
+    # Pick template based on target_settings and rotate nextSmsTemplate.
+    # NOTE: This uses the module-level pick_and_rotate_template (best-effort GET then PATCH).
+        project = sa.get('project_id')
+        if not project:
+            return 'A'
+
+        doc_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/target_settings/settings'
+        headers = {'Authorization': f'Bearer {token}'}
+        try:
+            r = requests.get(doc_url, headers=headers, timeout=8)
+            if r.status_code != 200:
+                return 'A'
+            data = r.json()
+            fields = data.get('fields', {})
+            useA = True if (not fields.get('smsUseA')) else (fields.get('smsUseA', {}).get('booleanValue') is True)
+            useB = True if (not fields.get('smsUseB')) else (fields.get('smsUseB', {}).get('booleanValue') is True)
+            next_t = 'A'
+            if fields.get('nextSmsTemplate') and fields.get('nextSmsTemplate').get('stringValue'):
+                next_t = fields.get('nextSmsTemplate').get('stringValue')
+
+            # Decide chosen and next
+            if next_t == 'A' and useA:
+                chosen = 'A'
+                new_next = 'B' if useB else 'A'
+            elif next_t == 'B' and useB:
+                chosen = 'B'
+                new_next = 'A' if useA else 'B'
+            else:
+                # fallback: pick A if available else B
+                if useA:
+                    chosen = 'A'
+                    new_next = 'B' if useB else 'A'
+                elif useB:
+                    chosen = 'B'
+                    new_next = 'A'
+                else:
+                    # none enabled -> default A
+                    return 'A'
+
+            # write back new_next (best-effort)
+            patch_body = {'fields': {'nextSmsTemplate': {'stringValue': new_next}}}
+            # PATCH to the document path
+            try:
+                # Use updateMask to avoid overwriting the full document (which
+                # can unintentionally clear other fields). Only update
+                # nextSmsTemplate.
+                r2 = requests.patch(
+                    doc_url,
+                    params={'updateMask.fieldPaths': 'nextSmsTemplate'},
+                    headers={**headers, 'Content-Type': 'application/json'},
+                    json=patch_body,
+                    timeout=8,
+                )
+                # ignore result; best-effort
+            except Exception:
+                pass
+            return chosen
+        except Exception:
+            return 'A'
+
     ts = _get_target_settings_top(uid)
     tpl = None
-    if template_type == 'A':
+    # If caller explicitly passed 'A' or 'B', use it; otherwise consult cloud settings via rotation helper
+    if template_type in ('A', 'B'):
+        chosen_type = template_type
+    else:
+        chosen_type = pick_and_rotate_template(uid)
+    if chosen_type == 'A':
         tpl = ts.get('smsTemplateA')
     else:
         tpl = ts.get('smsTemplateB')
@@ -1180,13 +1726,20 @@ def send_sms_once(uid, to_number, template_type='A', live=False):
                     print('送信成功(リトライ)', info)
                     if live:
                         try:
-                            rec = {'tel': norm, 'status': 'sent', 'response': info, 'sentAt': int(time.time()), 'template': template_type}
+                            # record the actual chosen_type used for this send
+                            rec = {'tel': norm, 'status': '送信済', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
                             write_sms_history(uid, rec)
                         except Exception:
                             pass
                     return (True, info)
                 else:
                     print('送信失敗(リトライ)', info)
+                    if live:
+                        try:
+                            rec = {'tel': norm, 'status': f'送信失敗{r2.status_code}', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
+                            write_sms_history(uid, rec)
+                        except Exception:
+                            pass
                     return (False, info)
 
         if 200 <= r.status_code < 300:
@@ -1197,13 +1750,27 @@ def send_sms_once(uid, to_number, template_type='A', live=False):
             print('送信成功', info)
             if live:
                 try:
-                    rec = {'tel': norm, 'status': 'sent', 'response': info, 'sentAt': int(time.time()), 'template': template_type}
+                    # record the actual chosen_type used for this send
+                    rec = {'tel': norm, 'status': '送信済', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
                     write_sms_history(uid, rec)
                 except Exception:
                     pass
             return (True, info)
         else:
             print('送信失敗', info)
+            if live:
+                try:
+                    rec = {'tel': norm, 'status': f'送信失敗{r.status_code}', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
+                    write_sms_history(uid, rec)
+                except Exception:
+                    pass
             return (False, info)
     except Exception as e:
-        return (False, str(e))
+        # best-effort: record exception as failure in sms_history
+        try:
+            if live:
+                rec = {'tel': norm if 'norm' in locals() else to_number, 'status': '送信失敗', 'response': {'error': str(e)}, 'sentAt': int(time.time()), 'template': chosen_type if 'chosen_type' in locals() else None}
+                write_sms_history(uid, rec)
+        except Exception:
+            pass
+        return (False, {'error': str(e)})
