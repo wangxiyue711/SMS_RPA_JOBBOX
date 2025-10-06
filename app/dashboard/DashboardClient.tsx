@@ -230,6 +230,29 @@ export default function DashboardClient() {
   return (
     <main className="main">
       <div className="module-shell">
+        {/* Global date filter toolbar controlling stats + chart */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            gap: 12,
+            marginBottom: 12,
+          }}
+        >
+          <label style={{ fontSize: 12, color: "var(--muted)" }}>開始</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+          <label style={{ fontSize: 12, color: "var(--muted)" }}>終了</label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+        </div>
         <div
           className="stat-grid"
           style={{
@@ -283,34 +306,7 @@ export default function DashboardClient() {
                 marginBottom: 8,
               }}
             >
-              <div style={{ fontWeight: 700 }}>RPA発信回数</div>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                justifyContent: "flex-start",
-                marginBottom: 8,
-              }}
-            >
-              <label style={{ fontSize: 12, color: "var(--muted)" }}>
-                開始
-              </label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-              <label style={{ fontSize: 12, color: "var(--muted)" }}>
-                終了
-              </label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
+              <div style={{ fontWeight: 700 }}>発信回数</div>
             </div>
 
             {loading ? (
@@ -357,8 +353,14 @@ export default function DashboardClient() {
                         {/* compute layout values */}
                         {(() => {
                           const colWidth = 72; // width per day column
-                          const chartHeight = 92; // internal chart height
-                          const svgHeight = chartHeight + 12; // leave space for top/bottom
+                          // Label/layout constants
+                          const labelOffset = 16; // desired gap above the point
+                          const topClamp = 12; // minimum baseline to avoid clipping text
+                          // Ensure topPad is large enough so highest point won't hit the clamp
+                          const topPad = Math.max(30, topClamp + labelOffset);
+                          const bottomPad = 16; // space for x-axis labels/foot
+                          const plotHeight = 110; // drawable height for data
+                          const svgHeight = topPad + plotHeight + bottomPad;
                           const svgWidth = Math.max(
                             counts.length * colWidth,
                             200
@@ -367,8 +369,8 @@ export default function DashboardClient() {
                           const pts = counts.map((c: number, i: number) => {
                             const x = i * colWidth + colWidth / 2;
                             const y = max
-                              ? Math.round((1 - c / max) * chartHeight) + 6
-                              : chartHeight + 6;
+                              ? Math.round((1 - c / max) * plotHeight) + topPad
+                              : topPad + plotHeight;
                             return { x, y, v: c };
                           });
 
@@ -382,14 +384,15 @@ export default function DashboardClient() {
                             : "";
 
                           // area under curve path (closed)
+                          const baseY = topPad + plotHeight;
                           const areaD = pts.length
                             ? "M " +
                               pts.map((p) => `${p.x} ${p.y}`).join(" L ") +
-                              ` L ${pts.length ? pts[pts.length - 1].x : 0} ${
-                                chartHeight + 8
-                              } L ${pts.length ? pts[0].x : 0} ${
-                                chartHeight + 8
-                              } Z`
+                              ` L ${
+                                pts.length ? pts[pts.length - 1].x : 0
+                              } ${baseY} L ${
+                                pts.length ? pts[0].x : 0
+                              } ${baseY} Z`
                             : "";
 
                           return (
@@ -448,19 +451,45 @@ export default function DashboardClient() {
                                 )}
 
                                 {/* points */}
-                                {pts.map((p, idx) => (
-                                  <g key={idx}>
-                                    <circle
-                                      cx={p.x}
-                                      cy={p.y}
-                                      r={4}
-                                      fill="#ffffff"
-                                      stroke={strokeColor}
-                                      strokeWidth={2}
-                                    />
-                                    <title>{`${labels[idx]}: ${p.v}`}</title>
-                                  </g>
-                                ))}
+                                {pts.map((p, idx) => {
+                                  // Always render label directly above the point (centered). Clamp to a small top padding
+                                  // that is guaranteed to be above even the highest point.
+                                  const labelY = Math.max(
+                                    topClamp,
+                                    p.y - labelOffset
+                                  );
+                                  const labelX = p.x;
+                                  return (
+                                    <g key={idx}>
+                                      <circle
+                                        cx={p.x}
+                                        cy={p.y}
+                                        r={4}
+                                        fill="#ffffff"
+                                        stroke={strokeColor}
+                                        strokeWidth={2}
+                                      />
+                                      {/* value label with outline to avoid overlap/low contrast */}
+                                      <text
+                                        x={labelX}
+                                        y={labelY}
+                                        textAnchor="middle"
+                                        fontSize="11"
+                                        fill={strokeColor}
+                                        stroke="#ffffff"
+                                        strokeWidth={3}
+                                        style={{
+                                          userSelect: "none",
+                                          paintOrder: "stroke fill",
+                                          pointerEvents: "none",
+                                        }}
+                                      >
+                                        {p.v}
+                                      </text>
+                                      <title>{`${labels[idx]}: ${p.v}`}</title>
+                                    </g>
+                                  );
+                                })}
                               </svg>
 
                               <div
