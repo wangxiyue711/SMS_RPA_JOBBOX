@@ -127,9 +127,12 @@ html,
 body,
 #root {
   height: 100%;
+  margin: 0;
+  padding: 0;
 }
 body {
   margin: 0;
+  padding: 0;
   font-family: Inter, "Helvetica Neue", "Segoe UI", "Hiragino Kaku Gothic ProN",
     "Meiryo", sans-serif;
   background: linear-gradient(
@@ -138,6 +141,7 @@ body {
     rgba(240, 240, 240, 1) 100%
   );
   color: var(--text);
+  overflow-x: hidden;
 }
 
 /* Ensure content fills behind header and no visual seam */
@@ -166,12 +170,14 @@ main {
   min-height: 100vh;
   align-items: center;
   justify-content: center;
-  padding: 40px 20px;
+  padding: 20px;
+  margin: 0;
+  box-sizing: border-box;
 }
 
 .card {
   width: 100%;
-  max-width: 520px;
+  max-width: 420px;
   background: var(--card);
   border-radius: 14px;
   padding: 32px;
@@ -183,16 +189,16 @@ main {
 .card form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   width: 100%;
-  max-width: 440px;
+  max-width: 400px;
   margin: 0 auto;
 }
 
 .title {
-  font-size: 30px;
+  font-size: 28px;
   font-weight: 700;
-  margin-bottom: 14px;
+  margin-bottom: 20px;
   color: var(--shade-2);
   letter-spacing: 0.2px;
   text-align: center;
@@ -344,7 +350,7 @@ main {
   font-size: 13px;
 }
 .error {
-  color: #b00020;
+  color: #ff0000;
 }
 .ok {
   color: var(--shade-2);
@@ -353,6 +359,42 @@ main {
 /* subtle input label layout for compact modern look */
 .field-row {
   margin-bottom: 8px;
+}
+
+/* Password input with toggle icon */
+.input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-icon .input {
+  padding-right: 45px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 12px;
+  top: 40%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--shade-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+}
+
+.password-toggle:hover {
+  color: var(--shade-2);
+}
+
+.password-toggle svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* Dashboard layout */

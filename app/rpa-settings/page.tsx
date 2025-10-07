@@ -19,40 +19,37 @@ type AccountRow = {
 };
 
 export default function RPASettingsPage() {
-  const [rows, setRows] = useState<AccountRow[]>([
-    { account_name: "", jobbox_id: "", jobbox_password: "" },
-  ]);
-  const [showPasswords, setShowPasswords] = useState<boolean[]>([false]);
+  const [formData, setFormData] = useState<AccountRow>({
+    account_name: "",
+    jobbox_id: "",
+    jobbox_password: "",
+  });
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState<Array<any>>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
-  const addRow = () =>
-    setRows((r) => [
-      ...r,
-      { account_name: "", jobbox_id: "", jobbox_password: "" },
-    ]);
-  const removeRow = (idx: number) =>
-    setRows((r) => r.filter((_, i) => i !== idx));
+  // For compatibility with existing code
+  const rows = [formData];
+  const showPasswords = [showPassword];
+
   const updateRow = (idx: number, field: keyof AccountRow, value: string) => {
-    const copy = [...rows];
-    copy[idx][field] = value;
-    setRows(copy);
+    if (idx === 0) {
+      setFormData((prev) => ({
+        ...prev,
+        [field]: value,
+      }));
+    }
   };
 
   const toggleShowPassword = (idx: number) => {
-    setShowPasswords((s) => {
-      const copy = [...s];
-      if (idx >= copy.length) {
-        // extend to match rows
-        while (copy.length <= idx) copy.push(false);
-      }
-      copy[idx] = !copy[idx];
-      return copy;
-    });
+    if (idx === 0) {
+      setShowPassword(!showPassword);
+    }
   };
 
   const loadSaved = async () => {
@@ -121,9 +118,9 @@ export default function RPASettingsPage() {
           addDoc(collection(db, "accounts", uid, "jobbox_accounts"), r)
         )
       );
-      setRows([{ account_name: "", jobbox_id: "", jobbox_password: "" }]);
+      setFormData({ account_name: "", jobbox_id: "", jobbox_password: "" });
       await loadSaved();
-      setSuccess("保存しました");
+      setSuccess("✓ 保存しました");
       setTimeout(() => setSuccess(""), 3000);
     } catch (err: any) {
       console.error("save error", err);
@@ -152,124 +149,302 @@ export default function RPASettingsPage() {
       <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>
         アカウント設定
       </h2>
-      <p style={{ marginBottom: 16 }}>
-        RPAに使用する求人ボックスアカウントを追加できます。保存後、RPA実行時にクラウドから読み込みます。
+      <p style={{ marginBottom: 24 }}>
+        RPAで使用する求人ボックスアカウントを登録 / 管理することができます。
       </p>
 
-      <form onSubmit={handleSave} autoComplete="off">
-        {/* Hidden fields to trap browser autofill (do not remove) */}
-        <div
-          style={{ position: "absolute", left: -9999, top: -9999, opacity: 0 }}
-          aria-hidden
+      {/* 新規アカウント登録ブロック */}
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid rgba(48, 48, 48, 0.08)",
+          borderRadius: 12,
+          padding: 24,
+          marginBottom: 32,
+        }}
+      >
+        <h3
+          style={{
+            fontSize: 18,
+            fontWeight: 700,
+            marginBottom: 16,
+            marginTop: 0,
+          }}
         >
-          <input name="fake-username" type="text" autoComplete="username" />
-          <input
-            name="fake-password"
-            type="password"
-            autoComplete="current-password"
-          />
-        </div>
-        <table
-          style={{ width: "100%", marginBottom: 12, tableLayout: "fixed" }}
-        >
-          <colgroup>
-            <col style={{ width: "28%" }} />
-            <col style={{ width: "32%" }} />
-            <col style={{ width: "30%" }} />
-            <col style={{ width: "10%" }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>アカウント名</th>
-              <th>メール</th>
-              <th>パスワード</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, idx) => (
-              <tr key={idx}>
-                <td>
+          求人ボックスアカウント名
+        </h3>
+
+        <form onSubmit={handleSave} autoComplete="off">
+          {/* Hidden fields to trap browser autofill (do not remove) */}
+          <div
+            style={{
+              position: "absolute",
+              left: -9999,
+              top: -9999,
+              opacity: 0,
+            }}
+            aria-hidden
+          >
+            <input name="fake-username" type="text" autoComplete="username" />
+            <input
+              name="fake-password"
+              type="password"
+              autoComplete="current-password"
+            />
+          </div>
+
+          <div style={{ display: "grid", gap: 16, marginBottom: 20 }}>
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: 6,
+                  fontSize: 14,
+                  fontWeight: 500,
+                }}
+              >
+                求人ボックスアカウント名
+              </label>
+              <input
+                name="jobbox_account_name"
+                autoComplete="off"
+                value={rows[0]?.account_name || ""}
+                onChange={(e) => updateRow(0, "account_name", e.target.value)}
+                placeholder="xxx株式会社"
+                required
+                className="input"
+                style={{ width: "100%", boxSizing: "border-box" }}
+              />
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 16,
+              }}
+            >
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: 6,
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  メールアドレス
+                </label>
+                <input
+                  name="jobbox_id"
+                  autoComplete="off"
+                  value={rows[0]?.jobbox_id || ""}
+                  onChange={(e) => updateRow(0, "jobbox_id", e.target.value)}
+                  placeholder="sample@sample-job.biz"
+                  required
+                  className="input"
+                  style={{ width: "100%", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: 6,
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  パスワード
+                </label>
+                <div className="input-with-icon">
                   <input
-                    name={`jobbox_account_name_${idx}`}
-                    autoComplete="off"
-                    value={r.account_name}
+                    name="jobbox_password"
+                    autoComplete="new-password"
+                    type={showPasswords[0] ? "text" : "password"}
+                    value={rows[0]?.jobbox_password || ""}
                     onChange={(e) =>
-                      updateRow(idx, "account_name", e.target.value)
+                      updateRow(0, "jobbox_password", e.target.value)
                     }
+                    placeholder="パスワードを入力してください"
                     required
+                    className="input"
                     style={{ width: "100%", boxSizing: "border-box" }}
                   />
-                </td>
-                <td>
-                  <input
-                    name={`jobbox_id_${idx}`}
-                    autoComplete="off"
-                    value={r.jobbox_id}
-                    onChange={(e) =>
-                      updateRow(idx, "jobbox_id", e.target.value)
-                    }
-                    required
-                    style={{ width: "100%", boxSizing: "border-box" }}
-                  />
-                </td>
-                <td>
-                  <div style={{ position: "relative" }}>
-                    <input
-                      name={`jobbox_password_${idx}`}
-                      autoComplete="new-password"
-                      type={showPasswords[idx] ? "text" : "password"}
-                      value={r.jobbox_password}
-                      onChange={(e) =>
-                        updateRow(idx, "jobbox_password", e.target.value)
-                      }
-                      required
-                      style={{
-                        width: "100%",
-                        paddingRight: 44,
-                        boxSizing: "border-box",
-                      }}
-                    />
+                  <button
+                    type="button"
+                    className="password-toggle"
+                    onClick={() => toggleShowPassword(0)}
+                    aria-label={showPasswords[0] ? "隠す" : "表示"}
+                  >
+                    {showPasswords[0] ? (
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                    ) : (
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <button className="btn" type="submit" disabled={loading}>
+            {loading ? "保存中..." : "保存"}
+          </button>
+          {error && <div style={{ color: "red", marginTop: 8 }}>{error}</div>}
+          {success && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                color: "#28a745",
+                marginTop: 8,
+                fontWeight: 700,
+              }}
+            >
+              {success}
+            </div>
+          )}
+        </form>
+      </div>
+
+      <h3 style={{ marginTop: 28, marginBottom: 12 }}>保存済みアカウント</h3>
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid rgba(48,48,48,0.08)",
+          borderRadius: 12,
+          padding: 20,
+          marginBottom: 24,
+        }}
+      >
+        {saved.length === 0 ? (
+          <div>アカウントはまだ保存されていません。</div>
+        ) : (
+          <ul
+            className="saved-list"
+            style={{
+              listStyle: "none",
+              padding: 0,
+              margin: 0,
+              display: "grid",
+              gap: 12,
+            }}
+          >
+            {saved.map((s, i) => (
+              <li
+                key={s.id}
+                onMouseEnter={() => setHoveredIndex(i)}
+                onMouseLeave={() => setHoveredIndex(null)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background:
+                    hoveredIndex === i
+                      ? "#eef6fb"
+                      : i % 2 === 0
+                      ? "#ffffff"
+                      : "#fbfbfc",
+                  padding: 12,
+                  borderRadius: 8,
+                  transition: "background 120ms ease",
+                }}
+              >
+                <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      color: "var(--text, #111)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {s.account_name}
+                  </div>
+                  <div
+                    style={{
+                      color: "var(--muted, #666)",
+                      fontSize: 13,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {s.jobbox_id}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    marginLeft: 12,
+                  }}
+                >
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
+                    <span style={{ fontFamily: "monospace" }}>
+                      {s.jobbox_password_hidden ? "●●●●●●" : s.jobbox_password}
+                    </span>
                     <button
                       type="button"
-                      onClick={() => toggleShowPassword(idx)}
-                      aria-label={showPasswords[idx] ? "隠す" : "表示"}
+                      onClick={() =>
+                        setSaved((prev) =>
+                          prev.map((it, idx) =>
+                            idx === i
+                              ? {
+                                  ...it,
+                                  jobbox_password_hidden:
+                                    !it.jobbox_password_hidden,
+                                }
+                              : it
+                          )
+                        )
+                      }
+                      aria-label={s.jobbox_password_hidden ? "表示" : "隠す"}
                       style={{
-                        position: "absolute",
-                        right: 6,
-                        top: "50%",
-                        transform: "translateY(-50%)",
                         border: "none",
                         background: "transparent",
                         cursor: "pointer",
                         padding: 6,
-                        display: "flex",
+                        display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        zIndex: 3,
+                        width: 32,
+                        height: 32,
+                        lineHeight: 0,
                       }}
                     >
-                      {showPasswords[idx] ? (
+                      {s.jobbox_password_hidden ? (
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
                           width="18"
                           height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden
-                        >
-                          <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-5 0-9.27-3-11-7 1.11-2.45 2.98-4.44 5.23-5.66" />
-                          <path d="M1 1l22 22" />
-                        </svg>
-                      ) : (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="18"
-                          height="18"
+                          style={{ display: "block" }}
                           viewBox="0 0 24 24"
                           fill="none"
                           stroke="currentColor"
@@ -281,224 +456,80 @@ export default function RPASettingsPage() {
                           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
                           <circle cx="12" cy="12" r="3" />
                         </svg>
+                      ) : (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="18"
+                          height="18"
+                          style={{ display: "block" }}
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                        >
+                          <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-5 0-9.27-3-11-7 1.11-2.45 2.98-4.44 5.23-5.66" />
+                          <path d="M1 1l22 22" />
+                        </svg>
                       )}
                     </button>
                   </div>
-                </td>
-                <td style={{ textAlign: "center" }}>
-                  <button
-                    type="button"
-                    onClick={() => removeRow(idx)}
-                    disabled={rows.length === 1}
-                  >
-                    削除
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{ marginBottom: 12 }}>
-          <button type="button" onClick={addRow}>
-            行を追加
-          </button>
-        </div>
-        <button className="btn" type="submit" disabled={loading}>
-          {loading ? "保存中..." : "保存"}
-        </button>
-        {error && <div style={{ color: "red", marginTop: 8 }}>{error}</div>}
-      </form>
 
-      <h3 style={{ marginTop: 28, marginBottom: 12 }}>保存済みアカウント</h3>
-      {saved.length === 0 ? (
-        <div>アカウントはまだ保存されていません。</div>
-      ) : (
-        <ul
-          className="saved-list"
-          style={{
-            listStyle: "none",
-            padding: 0,
-            margin: 0,
-            display: "grid",
-            gap: 8,
-          }}
-        >
-          {saved.map((s, i) => (
-            <li
-              key={s.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)",
-                padding: 12,
-                borderRadius: 8,
-              }}
-            >
-              <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-                <div
-                  style={{
-                    fontWeight: 700,
-                    color: "var(--text, #fff)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {s.account_name}
-                </div>
-                <div
-                  style={{
-                    color: "var(--muted, #aaa)",
-                    fontSize: 13,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {s.jobbox_id}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  marginLeft: 12,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontFamily: "monospace" }}>
-                    {s.jobbox_password_hidden ? "●●●●●●" : s.jobbox_password}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSaved((prev) =>
-                        prev.map((it, idx) =>
-                          idx === i
-                            ? {
-                                ...it,
-                                jobbox_password_hidden:
-                                  !it.jobbox_password_hidden,
-                              }
-                            : it
-                        )
-                      )
-                    }
-                    aria-label={s.jobbox_password_hidden ? "表示" : "隠す"}
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      padding: 6,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 32,
-                      height: 32,
-                      lineHeight: 0,
-                    }}
-                  >
-                    {s.jobbox_password_hidden ? (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="18"
-                        height="18"
-                        style={{ display: "block" }}
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden
-                      >
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    ) : (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="18"
-                        height="18"
-                        style={{ display: "block" }}
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden
-                      >
-                        <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-5 0-9.27-3-11-7 1.11-2.45 2.98-4.44 5.23-5.66" />
-                        <path d="M1 1l22 22" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-
-                <div>
-                  <button
-                    onClick={() => {
-                      setConfirmId(s.id);
-                      setConfirmOpen(true);
-                    }}
-                    aria-label="削除"
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      padding: 6,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "var(--shade-1)",
-                      width: 32,
-                      height: 32,
-                      lineHeight: 0,
-                    }}
-                  >
-                    <svg
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      style={{ display: "block" }}
+                  <div>
+                    <button
+                      onClick={() => {
+                        setConfirmId(s.id);
+                        setConfirmOpen(true);
+                      }}
+                      aria-label="削除"
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        padding: 6,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "var(--shade-1)",
+                        width: 32,
+                        height: 32,
+                        lineHeight: 0,
+                      }}
                     >
-                      <path
-                        d="M18 6L6 18"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M6 6L18 18"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                        style={{ display: "block" }}
+                      >
+                        <path
+                          d="M18 6L6 18"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M6 6L18 18"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      {success && (
-        <div
-          className="msg"
-          style={{ color: "var(--accent)", marginTop: 12, fontWeight: 700 }}
-        >
-          {success}
-        </div>
-      )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {/* success message moved to form area */}
       {confirmOpen && (
         <div
           role="dialog"
@@ -512,8 +543,9 @@ export default function RPASettingsPage() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            background: "rgba(0,0,0,0.4)",
+            background: "rgba(0,0,0,0.35)",
             zIndex: 9999,
+            padding: 20,
           }}
           onClick={() => {
             setConfirmOpen(false);
@@ -523,37 +555,58 @@ export default function RPASettingsPage() {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: "var(--bg, #0b0b0b)",
-              padding: 18,
-              borderRadius: 8,
+              background: "#efefef",
+              padding: 20,
+              borderRadius: 10,
               minWidth: 320,
-              boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+              maxWidth: 520,
+              width: "100%",
+              boxShadow: "0 12px 28px rgba(0,0,0,0.15)",
             }}
           >
-            <div style={{ marginBottom: 12, fontWeight: 700 }}>確認</div>
-            <div style={{ marginBottom: 18 }}>
+            <div style={{ marginBottom: 8, fontWeight: 800, fontSize: 16 }}>
+              確認
+            </div>
+            <div style={{ marginBottom: 20, color: "#222" }}>
               このアカウントを削除してもよろしいですか？
             </div>
-            <div
-              style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}
-            >
+
+            <div style={{ display: "flex", gap: 12 }}>
               <button
                 onClick={() => {
                   setConfirmOpen(false);
                   setConfirmId(null);
                 }}
-                style={{ padding: "8px 12px" }}
+                style={{
+                  flex: 1,
+                  background: "#fff",
+                  border: "1px solid rgba(0,0,0,0.12)",
+                  color: "#111",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
               >
                 キャンセル
               </button>
+
               <button
                 onClick={async () => {
                   if (confirmId) await handleDelete(confirmId);
                   setConfirmOpen(false);
                   setConfirmId(null);
                 }}
-                className="btn"
-                style={{ padding: "8px 12px" }}
+                style={{
+                  flex: 1,
+                  background: "#2e2e2e",
+                  border: "none",
+                  color: "#fff",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
               >
                 削除
               </button>
