@@ -163,17 +163,8 @@ export default function RPASettingsPage() {
           marginBottom: 32,
         }}
       >
-        <h3
-          style={{
-            fontSize: 18,
-            fontWeight: 700,
-            marginBottom: 16,
-            marginTop: 0,
-          }}
-        >
-          求人ボックスアカウント名
-        </h3>
 
+        
         <form onSubmit={handleSave} autoComplete="off">
           {/* Hidden fields to trap browser autofill (do not remove) */}
           <div
