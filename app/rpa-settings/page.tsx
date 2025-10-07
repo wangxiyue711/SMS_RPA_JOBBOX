@@ -120,7 +120,7 @@ export default function RPASettingsPage() {
       );
       setFormData({ account_name: "", jobbox_id: "", jobbox_password: "" });
       await loadSaved();
-      setSuccess("✓ 保存しました");
+      setSuccess("✅ 保存しました！");
       setTimeout(() => setSuccess(""), 3000);
     } catch (err: any) {
       console.error("save error", err);
@@ -163,8 +163,6 @@ export default function RPASettingsPage() {
           marginBottom: 32,
         }}
       >
-
-        
         <form onSubmit={handleSave} autoComplete="off">
           {/* Hidden fields to trap browser autofill (do not remove) */}
           <div

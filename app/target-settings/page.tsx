@@ -506,7 +506,7 @@ export default function TargetSettingsPage() {
       });
       setSegFormOpen(false);
       loadSegments();
-      setSaveMessage({ type: "success", text: "保存しました！" });
+      setSaveMessage({ type: "success", text: " 保存しました！" });
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (e: any) {
       console.error("saveSegment error", e);

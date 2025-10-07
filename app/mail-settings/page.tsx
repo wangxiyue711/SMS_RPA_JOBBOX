@@ -77,7 +77,7 @@ export default function MailSettingsPage() {
     const docRef = doc(db, "accounts", uid, "mail_settings", "settings");
     await setDoc(docRef, { email, appPass, createdAt: Date.now() });
     await loadSetting();
-    setSuccessMsg("保存しました");
+    setSuccessMsg("✅ 保存しました！");
     setTimeout(() => setSuccessMsg(""), 3000);
     setLoading(false);
   }
@@ -99,7 +99,8 @@ export default function MailSettingsPage() {
         メール設定
       </h2>
       <p style={{ marginBottom: 16 }}>
-        メール監視用アカウントと16桁の専用パスワードを保存します。RPA実行時にクラウドから読み込みます。
+        RPAで監視するメールアドレスとアプリパスワード(16桁)を登録 /
+        管理することができます。
       </p>
 
       <form onSubmit={handleSave} autoComplete="off">
@@ -125,18 +126,19 @@ export default function MailSettingsPage() {
           <tbody>
             <tr>
               <td style={{ verticalAlign: "top" }}>
-                <label>監視メールアドレス</label>
+                <label>メールアドレス</label>
                 <input
                   name="mail_settings_email"
                   autoComplete="off"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  placeholder="sample@company.com"
                   required
                   style={{ width: "100%", boxSizing: "border-box" }}
                 />
               </td>
               <td>
-                <label>16桁の専用パスワード</label>
+                <label>アプリパスワード</label>
                 <div style={{ position: "relative" }}>
                   <input
                     name="mail_settings_apppass"
@@ -144,6 +146,7 @@ export default function MailSettingsPage() {
                     type={showPass ? "text" : "password"}
                     value={appPass}
                     onChange={(e) => setAppPass(e.target.value)}
+                    placeholder="英数字16文字（スペースなし）"
                     required
                     style={{
                       width: "100%",
@@ -209,16 +212,21 @@ export default function MailSettingsPage() {
         <button className="btn" type="submit" disabled={loading}>
           {loading ? "保存中..." : "保存"}
         </button>
-      </form>
 
-      {successMsg && (
-        <div
-          className="msg"
-          style={{ color: "var(--accent)", marginTop: 12, fontWeight: 700 }}
-        >
-          {successMsg}
-        </div>
-      )}
+        {successMsg && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              color: "#28a745",
+              marginTop: 8,
+              fontWeight: 700,
+            }}
+          >
+            {successMsg}
+          </div>
+        )}
+      </form>
     </div>
   );
 }
