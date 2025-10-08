@@ -33,6 +33,11 @@ export default function ApiSettingsPage() {
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+  const [fieldError, setFieldError] = useState<{
+    field: string;
+    msg: string;
+  } | null>(null);
 
   useEffect(() => {
     loadSetting();
@@ -63,6 +68,32 @@ export default function ApiSettingsPage() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    setError("");
+    // validate required fields (no blank entries) - show field-level tooltip
+    if (!baseUrl || !baseUrl.trim()) {
+      setFieldError({
+        field: "baseUrl",
+        msg: "このフィールドを入力してください。",
+      });
+      setLoading(false);
+      return;
+    }
+    if (!apiId || !apiId.trim()) {
+      setFieldError({
+        field: "apiId",
+        msg: "このフィールドを入力してください。",
+      });
+      setLoading(false);
+      return;
+    }
+    if (!apiPass || !apiPass.trim()) {
+      setFieldError({
+        field: "apiPass",
+        msg: "このフィールドを入力してください。",
+      });
+      setLoading(false);
+      return;
+    }
     try {
       const user = await waitForAuthReady();
       if (!user) throw new Error("未ログインです。ログインしてください。");
@@ -75,10 +106,11 @@ export default function ApiSettingsPage() {
         { merge: true }
       );
       setSaved(true);
+      setFieldError(null);
       setTimeout(() => setSaved(false), 2500);
     } catch (e: any) {
       console.error("save api settings error", e);
-      alert(e?.message || "保存に失敗しました。");
+      setError(e?.message || "保存に失敗しました。");
     } finally {
       setLoading(false);
     }
@@ -106,7 +138,7 @@ export default function ApiSettingsPage() {
         </div>
       </div>
       <p style={{ marginBottom: 16 }}>
-        外部APIのベースURLとトークンを設定します。
+        外部APIのURLとトークンを設定 / 管理することができます。
       </p>
 
       <form onSubmit={handleSave} autoComplete="off">
@@ -142,42 +174,87 @@ export default function ApiSettingsPage() {
 
         <div style={{ marginBottom: 12 }}>
           <label>APIベースURL</label>
-          <input
-            name="api_base_url"
-            autoComplete="off"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box", marginTop: 6 }}
-          />
+          <div className="field-tooltip-wrapper">
+            <input
+              name="api_base_url"
+              autoComplete="off"
+              value={baseUrl}
+              onChange={(e) => {
+                setBaseUrl(e.target.value);
+                if (fieldError && fieldError.field === "baseUrl")
+                  setFieldError(null);
+              }}
+              placeholder="https://api……"
+              style={{ width: "100%", boxSizing: "border-box", marginTop: 6 }}
+            />
+            {fieldError && fieldError.field === "baseUrl" && (
+              <div className="field-tooltip-bubble" aria-hidden>
+                <div className="field-tooltip-box">
+                  <div className="field-tooltip-icon">!</div>
+                  <div>{fieldError.msg}</div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={{ marginBottom: 12 }}>
           <label>API ID</label>
-          <input
-            name="api_id"
-            autoComplete="username"
-            value={apiId}
-            onChange={(e) => setApiId(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box", marginTop: 6 }}
-          />
+          <div className="field-tooltip-wrapper">
+            <input
+              name="api_id"
+              autoComplete="username"
+              value={apiId}
+              onChange={(e) => {
+                setApiId(e.target.value);
+                if (fieldError && fieldError.field === "apiId")
+                  setFieldError(null);
+              }}
+              placeholder="sm000……"
+              style={{ width: "100%", boxSizing: "border-box", marginTop: 6 }}
+            />
+            {fieldError && fieldError.field === "apiId" && (
+              <div className="field-tooltip-bubble" aria-hidden>
+                <div className="field-tooltip-box">
+                  <div className="field-tooltip-icon">!</div>
+                  <div>{fieldError.msg}</div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={{ marginBottom: 12 }}>
           <label>APIパスワード</label>
           <div style={{ position: "relative" }}>
-            <input
-              name="api_password"
-              autoComplete="new-password"
-              type={showPass ? "text" : "password"}
-              value={apiPass}
-              onChange={(e) => setApiPass(e.target.value)}
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                marginTop: 6,
-                paddingRight: 44,
-              }}
-            />
+            <div className="field-tooltip-wrapper">
+              <input
+                name="api_password"
+                autoComplete="new-password"
+                type={showPass ? "text" : "password"}
+                value={apiPass}
+                onChange={(e) => {
+                  setApiPass(e.target.value);
+                  if (fieldError && fieldError.field === "apiPass")
+                    setFieldError(null);
+                }}
+                placeholder="samplepassword"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  marginTop: 6,
+                  paddingRight: 44,
+                }}
+              />
+              {fieldError && fieldError.field === "apiPass" && (
+                <div className="field-tooltip-bubble" aria-hidden>
+                  <div className="field-tooltip-box">
+                    <div className="field-tooltip-icon">!</div>
+                    <div>{fieldError.msg}</div>
+                  </div>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setShowPass((s) => !s)}
@@ -263,12 +340,18 @@ export default function ApiSettingsPage() {
         <button className="btn" type="submit" disabled={loading}>
           {loading ? "保存中..." : "保存"}
         </button>
+        {error && <div style={{ color: "#ff0000", marginTop: 8 }}>{error}</div>}
         {saved && (
           <div
-            className="msg"
-            style={{ color: "var(--accent)", marginTop: 12, fontWeight: 700 }}
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              color: "#28a745",
+              marginTop: 8,
+              fontWeight: 700,
+            }}
           >
-            保存しました
+            ✅ 保存しました！
           </div>
         )}
       </form>

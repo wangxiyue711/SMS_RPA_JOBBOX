@@ -35,6 +35,10 @@ export default function MailSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
+  const [fieldError, setFieldError] = useState<{
+    field: string;
+    msg: string;
+  } | null>(null);
 
   useEffect(() => {
     loadSetting();
@@ -61,8 +65,29 @@ export default function MailSettingsPage() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    if (!email || appPass.length !== 16) {
-      alert("メールと16桁の専用パスワードを正しく入力してください（16桁）");
+    // field-level validation with tooltip
+    if (!email || !String(email).trim()) {
+      setFieldError({
+        field: "email",
+        msg: "このフィールドを入力してください。",
+      });
+      setLoading(false);
+      return;
+    }
+    const emailRe = /^\S+@\S+\.\S+$/;
+    if (!emailRe.test(email)) {
+      setFieldError({
+        field: "email",
+        msg: "有効なメールアドレスを入力してください。",
+      });
+      setLoading(false);
+      return;
+    }
+    if (!appPass || appPass.length !== 16) {
+      setFieldError({
+        field: "appPass",
+        msg: "英数字16文字で入力してください。",
+      });
       setLoading(false);
       return;
     }
@@ -78,6 +103,7 @@ export default function MailSettingsPage() {
     await setDoc(docRef, { email, appPass, createdAt: Date.now() });
     await loadSetting();
     setSuccessMsg("✅ 保存しました！");
+    setFieldError(null);
     setTimeout(() => setSuccessMsg(""), 3000);
     setLoading(false);
   }
@@ -127,33 +153,59 @@ export default function MailSettingsPage() {
             <tr>
               <td style={{ verticalAlign: "top" }}>
                 <label>メールアドレス</label>
-                <input
-                  name="mail_settings_email"
-                  autoComplete="off"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="sample@company.com"
-                  required
-                  style={{ width: "100%", boxSizing: "border-box" }}
-                />
+                <div className="field-tooltip-wrapper">
+                  <input
+                    name="mail_settings_email"
+                    autoComplete="off"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (fieldError && fieldError.field === "email")
+                        setFieldError(null);
+                    }}
+                    placeholder="sample@company.com"
+                    style={{ width: "100%", boxSizing: "border-box" }}
+                  />
+                  {fieldError && fieldError.field === "email" && (
+                    <div className="field-tooltip-bubble" aria-hidden>
+                      <div className="field-tooltip-box">
+                        <div className="field-tooltip-icon">!</div>
+                        <div>{fieldError.msg}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </td>
               <td>
                 <label>アプリパスワード</label>
                 <div style={{ position: "relative" }}>
-                  <input
-                    name="mail_settings_apppass"
-                    autoComplete="new-password"
-                    type={showPass ? "text" : "password"}
-                    value={appPass}
-                    onChange={(e) => setAppPass(e.target.value)}
-                    placeholder="英数字16文字（スペースなし）"
-                    required
-                    style={{
-                      width: "100%",
-                      paddingRight: 44,
-                      boxSizing: "border-box",
-                    }}
-                  />
+                  <div className="field-tooltip-wrapper">
+                    <input
+                      name="mail_settings_apppass"
+                      autoComplete="new-password"
+                      type={showPass ? "text" : "password"}
+                      value={appPass}
+                      onChange={(e) => {
+                        setAppPass(e.target.value);
+                        if (fieldError && fieldError.field === "appPass")
+                          setFieldError(null);
+                      }}
+                      placeholder="英数字16文字（スペースなし）"
+                      style={{
+                        width: "100%",
+                        paddingRight: 44,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    {fieldError && fieldError.field === "appPass" && (
+                      <div className="field-tooltip-bubble" aria-hidden>
+                        <div className="field-tooltip-box">
+                          <div className="field-tooltip-icon">!</div>
+                          <div>{fieldError.msg}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => setShowPass((s) => !s)}

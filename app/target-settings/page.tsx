@@ -17,6 +17,326 @@ import {
   orderBy,
 } from "firebase/firestore";
 
+// RichTextEditor 提取到文件顶部，避免在父组件重渲染时重新创建导致光标丢失。
+type RichTextEditorProps = {
+  value: string;
+  onChange: (html: string) => void;
+  placeholder?: string;
+};
+
+const RichTextEditor: React.FC<RichTextEditorProps> = ({
+  value,
+  onChange,
+  placeholder,
+}) => {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const isComposingRef = useRef(false);
+  const [showLinkDialog, setShowLinkDialog] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const savedRangeRef = useRef<Range | null>(null);
+
+  // 保存当前选区
+  const saveSelection = () => {
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+    }
+  };
+
+  // 恢复选区
+  const restoreSelection = () => {
+    if (savedRangeRef.current) {
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(savedRangeRef.current);
+      // 确保编辑器获得焦点
+      editorRef.current?.focus();
+    }
+  };
+
+  const execCommand = (command: string, val: any = null) => {
+    if (command === "italic") {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        if (!range.collapsed) {
+          const span = document.createElement("span");
+          span.style.fontStyle = "italic";
+          span.style.transform = "skew(-10deg)";
+          span.style.display = "inline-block";
+          try {
+            range.surroundContents(span);
+          } catch (e) {
+            span.appendChild(range.extractContents());
+            range.insertNode(span);
+          }
+          selection.removeAllRanges();
+        }
+      }
+    } else {
+      document.execCommand(command, false, val);
+    }
+    if (editorRef.current) {
+      onChange(editorRef.current.innerHTML);
+    }
+  };
+
+  const handleInput = () => {
+    if (editorRef.current && !isComposingRef.current) {
+      onChange(editorRef.current.innerHTML);
+    }
+  };
+
+  const handleCompositionStart = () => {
+    isComposingRef.current = true;
+  };
+
+  const handleCompositionEnd = () => {
+    isComposingRef.current = false;
+    if (editorRef.current) {
+      onChange(editorRef.current.innerHTML);
+    }
+  };
+
+  // 当外部 value 变化且与 DOM 不同时，更新 DOM 内容并尽量保持光标位置
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    // 如果编辑器正在被输入法组成，或当前有焦点，跳过覆盖 DOM 内容，
+    // 以避免在输入过程中重置导致光标消失
+    const isFocused = document.activeElement === el;
+    if (isComposingRef.current || isFocused) return;
+
+    const domHtml = el.innerHTML || "";
+    const newHtml = value || "";
+    if (domHtml === newHtml) return;
+
+    el.innerHTML = newHtml;
+  }, [value]);
+
+  return (
+    <div style={{ border: "1px solid #ddd", borderRadius: 4 }}>
+      <div
+        style={{
+          padding: "8px 12px",
+          borderBottom: "1px solid #eee",
+          display: "flex",
+          gap: 4,
+          background: "#f8f9fa",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => execCommand("bold")}
+          style={{
+            border: "none",
+            background: "transparent",
+            padding: "4px 8px",
+            cursor: "pointer",
+            borderRadius: 2,
+            fontSize: 14,
+            fontWeight: "bold",
+          }}
+          title="太字"
+        >
+          B
+        </button>
+        <button
+          type="button"
+          onClick={() => execCommand("italic")}
+          style={{
+            border: "none",
+            background: "transparent",
+            padding: "4px 8px",
+            cursor: "pointer",
+            borderRadius: 2,
+            fontSize: 14,
+            fontStyle: "italic",
+          }}
+          title="斜体"
+        >
+          I
+        </button>
+        <button
+          type="button"
+          onClick={() => execCommand("underline")}
+          style={{
+            border: "none",
+            background: "transparent",
+            padding: "4px 8px",
+            cursor: "pointer",
+            borderRadius: 2,
+            fontSize: 14,
+            textDecoration: "underline",
+          }}
+          title="下線"
+        >
+          U
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            saveSelection();
+            setShowLinkDialog(true);
+          }}
+          style={{
+            border: "none",
+            background: "transparent",
+            padding: "4px 8px",
+            cursor: "pointer",
+            borderRadius: 2,
+            fontSize: 14,
+          }}
+          title="リンク"
+        >
+          🔗
+        </button>
+      </div>
+
+      <div
+        ref={editorRef}
+        contentEditable
+        onInput={handleInput}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={handleCompositionEnd}
+        style={{
+          minHeight: 120,
+          padding: "12px",
+          fontSize: 14,
+          lineHeight: "1.5",
+          outline: "none",
+          background: "#fff",
+        }}
+        data-placeholder={placeholder}
+        suppressContentEditableWarning={true}
+      />
+
+      <style jsx>{`
+        div[contenteditable]:empty:before {
+          content: attr(data-placeholder);
+          color: #999;
+          font-style: italic;
+        }
+        div[contenteditable] span[style*="italic"] {
+          font-style: italic;
+          transform: skew(-10deg);
+          display: inline-block;
+        }
+        div[contenteditable] em,
+        div[contenteditable] i {
+          font-style: italic;
+          transform: skew(-10deg);
+          display: inline-block;
+        }
+      `}</style>
+
+      {/* リンク挿入ダイアログ */}
+      {showLinkDialog && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 8,
+              padding: 24,
+              maxWidth: 400,
+              width: "90%",
+              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 600 }}>
+              リンクを挿入
+            </h3>
+            <input
+              type="url"
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="https://example.com"
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                border: "1px solid #ddd",
+                borderRadius: 4,
+                fontSize: 14,
+                boxSizing: "border-box",
+                marginBottom: 16,
+              }}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  if (linkUrl.trim()) {
+                    restoreSelection();
+                    execCommand("createLink", linkUrl.trim());
+                  }
+                  setLinkUrl("");
+                  setShowLinkDialog(false);
+                } else if (e.key === "Escape") {
+                  setLinkUrl("");
+                  setShowLinkDialog(false);
+                }
+              }}
+            />
+            <div
+              style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}
+            >
+              <button
+                onClick={() => {
+                  setLinkUrl("");
+                  setShowLinkDialog(false);
+                }}
+                style={{
+                  background: "#f8f9fa",
+                  border: "1px solid #ddd",
+                  color: "#333",
+                  padding: "8px 16px",
+                  borderRadius: 4,
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => {
+                  if (linkUrl.trim()) {
+                    restoreSelection();
+                    execCommand("createLink", linkUrl.trim());
+                  }
+                  setLinkUrl("");
+                  setShowLinkDialog(false);
+                }}
+                disabled={!linkUrl.trim()}
+                style={{
+                  background: linkUrl.trim() ? "#333" : "#ccc",
+                  border: "none",
+                  color: "#fff",
+                  padding: "8px 16px",
+                  borderRadius: 4,
+                  fontSize: 14,
+                  cursor: linkUrl.trim() ? "pointer" : "not-allowed",
+                }}
+              >
+                挿入
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 async function waitForAuthReady(timeout = 3000): Promise<any | null> {
   const auth = getClientAuth();
   if (!auth) return null;
@@ -110,213 +430,6 @@ export default function TargetSettingsPage() {
       mail: { enabled: false, subject: "", body: "" },
     },
   });
-
-  // 富文本编辑器组件
-  const RichTextEditor = ({ value, onChange, placeholder }) => {
-    const editorRef = useRef(null);
-    const isComposingRef = useRef(false);
-
-    const execCommand = (command, value = null) => {
-      if (command === "italic") {
-        // 对于斜体，使用CSS样式而不是document.execCommand，以支持中文
-        const selection = window.getSelection();
-        if (selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          if (!range.collapsed) {
-            const span = document.createElement("span");
-            span.style.fontStyle = "italic";
-            span.style.transform = "skew(-10deg)";
-            span.style.display = "inline-block";
-            try {
-              range.surroundContents(span);
-            } catch (e) {
-              // 如果选择内容包含部分元素，使用extractContents
-              span.appendChild(range.extractContents());
-              range.insertNode(span);
-            }
-            selection.removeAllRanges();
-          }
-        }
-      } else {
-        document.execCommand(command, false, value);
-      }
-      if (editorRef.current) {
-        onChange(editorRef.current.innerHTML);
-      }
-    };
-
-    const handleInput = () => {
-      if (editorRef.current && !isComposingRef.current) {
-        onChange(editorRef.current.innerHTML);
-      }
-    };
-
-    const handleCompositionStart = () => {
-      isComposingRef.current = true;
-    };
-
-    const handleCompositionEnd = () => {
-      isComposingRef.current = false;
-      if (editorRef.current) {
-        onChange(editorRef.current.innerHTML);
-      }
-    };
-
-    // 只在初始化时设置内容，避免打字时重置
-    useEffect(() => {
-      if (editorRef.current && editorRef.current.innerHTML === "" && value) {
-        editorRef.current.innerHTML = value;
-      }
-    }, []);
-
-    return (
-      <div style={{ border: "1px solid #ddd", borderRadius: 4 }}>
-        {/* 工具栏 */}
-        <div
-          style={{
-            padding: "8px 12px",
-            borderBottom: "1px solid #eee",
-            display: "flex",
-            gap: 4,
-            background: "#f8f9fa",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => execCommand("bold")}
-            style={{
-              border: "none",
-              background: "transparent",
-              padding: "4px 8px",
-              cursor: "pointer",
-              borderRadius: 2,
-              fontSize: 14,
-              fontWeight: "bold",
-            }}
-            title="太字"
-          >
-            B
-          </button>
-          <button
-            type="button"
-            onClick={() => execCommand("italic")}
-            style={{
-              border: "none",
-              background: "transparent",
-              padding: "4px 8px",
-              cursor: "pointer",
-              borderRadius: 2,
-              fontSize: 14,
-              fontStyle: "italic",
-            }}
-            title="斜体"
-          >
-            I
-          </button>
-          <button
-            type="button"
-            onClick={() => execCommand("underline")}
-            style={{
-              border: "none",
-              background: "transparent",
-              padding: "4px 8px",
-              cursor: "pointer",
-              borderRadius: 2,
-              fontSize: 14,
-              textDecoration: "underline",
-            }}
-            title="下線"
-          >
-            U
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const url = prompt("リンクURLを入力してください:");
-              if (url) execCommand("createLink", url);
-            }}
-            style={{
-              border: "none",
-              background: "transparent",
-              padding: "4px 8px",
-              cursor: "pointer",
-              borderRadius: 2,
-              fontSize: 14,
-            }}
-            title="リンク"
-          >
-            🔗
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const input = document.createElement("input");
-              input.type = "file";
-              input.accept = "image/*";
-              input.onchange = (e) => {
-                const target = e.target as HTMLInputElement;
-                const file = target.files?.[0];
-                if (file) {
-                  // ここでファイルアップロード処理を実装可能
-                  alert("ファイル添付機能は実装予定です");
-                }
-              };
-              input.click();
-            }}
-            style={{
-              border: "none",
-              background: "transparent",
-              padding: "4px 8px",
-              cursor: "pointer",
-              borderRadius: 2,
-              fontSize: 14,
-            }}
-            title="添付"
-          >
-            📎
-          </button>
-        </div>
-
-        {/* 編集エリア */}
-        <div
-          ref={editorRef}
-          contentEditable
-          onInput={handleInput}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
-          style={{
-            minHeight: 120,
-            padding: "12px",
-            fontSize: 14,
-            lineHeight: "1.5",
-            outline: "none",
-            background: "#fff",
-          }}
-          data-placeholder={placeholder}
-          suppressContentEditableWarning={true}
-        />
-
-        <style jsx>{`
-          div[contenteditable]:empty:before {
-            content: attr(data-placeholder);
-            color: #999;
-            font-style: italic;
-          }
-          div[contenteditable] span[style*="italic"] {
-            font-style: italic;
-            transform: skew(-10deg);
-            display: inline-block;
-          }
-          div[contenteditable] em,
-          div[contenteditable] i {
-            font-style: italic;
-            transform: skew(-10deg);
-            display: inline-block;
-          }
-        `}</style>
-      </div>
-    );
-  };
 
   useEffect(() => {
     async function initAuth() {
@@ -443,6 +556,15 @@ export default function TargetSettingsPage() {
         setSaveMessage({
           type: "error",
           text: "条件タイトルを入力してください。",
+        });
+        return;
+      }
+
+      // SMS または メール のどちらか一つは選択必須
+      if (!segDraft.actions.sms.enabled && !segDraft.actions.mail.enabled) {
+        setSaveMessage({
+          type: "error",
+          text: "条件に不足があるため保存できません",
         });
         return;
       }
@@ -576,7 +698,7 @@ export default function TargetSettingsPage() {
         対象設定
       </h2>
       <p style={{ marginBottom: 16 }}>
-        RPAが対象とする求職者を絞り込む設定です。
+        RPAが対象とする応募者を設定 / 管理することができます。
       </p>
 
       {/* Debug info */}

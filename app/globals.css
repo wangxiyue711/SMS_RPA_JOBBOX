@@ -397,6 +397,71 @@ main {
   height: 16px;
 }
 
+/* field-level tooltip for validation errors */
+.field-tooltip-wrapper {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+.field-tooltip-bubble {
+  position: absolute;
+  /* place above the input, anchored to the right edge */
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: auto;
+  transform: none;
+  display: block;
+  pointer-events: none;
+  z-index: 60;
+}
+.field-tooltip-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  color: #333;
+  padding: 8px 12px;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(16, 24, 32, 0.12);
+  font-size: 13px;
+  position: relative;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.field-tooltip-icon {
+  background: #ff8a00;
+  color: #fff;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+.field-tooltip-box::after {
+  /* small downward arrow pointing to the input */
+  content: "";
+  position: absolute;
+  left: 18px;
+  bottom: -6px;
+  border-width: 6px;
+  border-style: solid;
+  border-color: #fff transparent transparent transparent;
+}
+.field-tooltip-box::before {
+  /* subtle border for the arrow (slightly darker) */
+  content: "";
+  position: absolute;
+  left: 17px;
+  bottom: -7px;
+  border-width: 7px;
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.18) transparent transparent transparent;
+}
+
 /* Dashboard layout */
 .dashboard {
   display: grid;
