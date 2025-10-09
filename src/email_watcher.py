@@ -11,6 +11,7 @@ from email.message import EmailMessage
 import requests
 import json
 import base64
+from typing import Optional
 
 
 def prompt_input(prompt, default=None):
@@ -357,6 +358,263 @@ def _get_mail_settings(uid: str) -> dict:
         return {}
 
 
+def _get_target_segments(uid: Optional[str]) -> list:
+    """Read all enabled segments from accounts/{uid}/target_segments collection from Firestore."""
+    sa_file = _find_service_account_file()
+    if not sa_file:
+        return []
+    try:
+        import json
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        with open(sa_file, 'r', encoding='utf-8') as f:
+            sa = json.load(f)
+        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+        creds.refresh(Request())
+        token = creds.token
+    except Exception:
+        return []
+    
+    project = sa.get('project_id') if isinstance(sa, dict) else None
+    if not project:
+        return []
+    
+    # Query the target_segments collection
+    collection_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/target_segments'
+    headers = {'Authorization': f'Bearer {token}'}
+    
+    try:
+        r = requests.get(collection_url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return []
+        
+        data = r.json()
+        documents = data.get('documents', [])
+        
+        segments = []
+        for doc in documents:
+            fields = doc.get('fields', {})
+            
+            # Extract segment data
+            segment = {
+                'id': doc.get('name', '').split('/')[-1],
+                'title': _extract_string_value(fields.get('title', {})),
+                'enabled': _extract_bool_value(fields.get('enabled', {})),
+                'priority': _extract_int_value(fields.get('priority', {})),
+                'conditions': _extract_conditions(fields.get('conditions', {})),
+                'actions': _extract_actions(fields.get('actions', {}))
+            }
+            
+            # Only include enabled segments
+            if segment['enabled']:
+                segments.append(segment)
+        
+        # Sort by priority (lower number = higher priority)
+        segments.sort(key=lambda x: x['priority'])
+        return segments
+        
+    except Exception as e:
+        print(f"Error reading target_segments: {e}")
+        return []
+
+
+def _extract_string_value(field):
+    """Extract string value from Firestore field."""
+    return field.get('stringValue', '')
+
+def _extract_bool_value(field):
+    """Extract boolean value from Firestore field."""
+    return field.get('booleanValue', False)
+
+def _extract_int_value(field):
+    """Extract integer value from Firestore field."""
+    return int(field.get('integerValue', 0))
+
+def _extract_conditions(conditions_field):
+    """Extract conditions from Firestore mapValue."""
+    if conditions_field.get('mapValue'):
+        fields = conditions_field['mapValue'].get('fields', {})
+        return {
+            'nameTypes': _extract_name_types(fields.get('nameTypes', {})),
+            'genders': _extract_genders(fields.get('genders', {})),
+            'ageRanges': _extract_age_ranges(fields.get('ageRanges', {}))
+        }
+    return {}
+
+def _extract_name_types(name_types_field):
+    """Extract nameTypes from Firestore mapValue."""
+    if name_types_field.get('mapValue'):
+        fields = name_types_field['mapValue'].get('fields', {})
+        return {
+            'kanji': _extract_bool_value(fields.get('kanji', {})),
+            'katakana': _extract_bool_value(fields.get('katakana', {})),
+            'hiragana': _extract_bool_value(fields.get('hiragana', {})),
+            'alpha': _extract_bool_value(fields.get('alpha', {}))
+        }
+    return {}
+
+def _extract_genders(genders_field):
+    """Extract genders from Firestore mapValue."""
+    if genders_field.get('mapValue'):
+        fields = genders_field['mapValue'].get('fields', {})
+        return {
+            'male': _extract_bool_value(fields.get('male', {})),
+            'female': _extract_bool_value(fields.get('female', {}))
+        }
+    return {}
+
+def _extract_age_ranges(age_ranges_field):
+    """Extract ageRanges from Firestore mapValue."""
+    if age_ranges_field.get('mapValue'):
+        fields = age_ranges_field['mapValue'].get('fields', {})
+        return {
+            'maleMin': _extract_int_value(fields.get('maleMin', {})),
+            'maleMax': _extract_int_value(fields.get('maleMax', {})),
+            'femaleMin': _extract_int_value(fields.get('femaleMin', {})),
+            'femaleMax': _extract_int_value(fields.get('femaleMax', {}))
+        }
+    return {}
+
+def _extract_actions(actions_field):
+    """Extract actions from Firestore mapValue."""
+    if actions_field.get('mapValue'):
+        fields = actions_field['mapValue'].get('fields', {})
+        return {
+            'sms': _extract_sms_action(fields.get('sms', {})),
+            'mail': _extract_mail_action(fields.get('mail', {}))
+        }
+    return {}
+
+def _extract_sms_action(sms_field):
+    """Extract SMS action from Firestore mapValue."""
+    if sms_field.get('mapValue'):
+        fields = sms_field['mapValue'].get('fields', {})
+        return {
+            'enabled': _extract_bool_value(fields.get('enabled', {})),
+            'text': _extract_string_value(fields.get('text', {}))
+        }
+    return {}
+
+def _extract_mail_action(mail_field):
+    """Extract mail action from Firestore mapValue."""
+    if mail_field.get('mapValue'):
+        fields = mail_field['mapValue'].get('fields', {})
+        return {
+            'enabled': _extract_bool_value(fields.get('enabled', {})),
+            'subject': _extract_string_value(fields.get('subject', {})),
+            'body': _extract_string_value(fields.get('body', {}))
+        }
+    return {}
+
+
+def _match_segment_conditions(applicant_detail, segment_conditions):
+    """
+    Check if applicant matches segment conditions.
+    Returns True ONLY if ALL THREE conditions match: name, gender, and age.
+    
+    applicant_detail: dict with keys like name, age, gender, etc.
+    segment_conditions: dict with nameTypes, genders, ageRanges
+    """
+    # Get applicant data - ALL THREE are required
+    name = applicant_detail.get('name', '').strip()
+    gender = applicant_detail.get('gender', '').strip()  # '男性' or '女性'
+    age = applicant_detail.get('age', 0)
+    
+    # All three fields must be present
+    if not name or not gender or not age:
+        return False
+    
+    # 1. Check name type condition
+    name_type = _detect_name_type(name)
+    name_conditions = segment_conditions.get('nameTypes', {})
+    
+    # Name type condition must be set and match
+    if not name_conditions.get(name_type, False):
+        return False
+    
+    # 2. Check gender condition
+    gender_conditions = segment_conditions.get('genders', {})
+    
+    if gender == '男性':
+        if not gender_conditions.get('male', False):
+            return False
+    elif gender == '女性':
+        if not gender_conditions.get('female', False):
+            return False
+    else:
+        return False  # Unknown gender
+    
+    # 3. Check age range condition
+    age_ranges = segment_conditions.get('ageRanges', {})
+    
+    if gender == '男性':
+        min_age = age_ranges.get('maleMin', 0)
+        max_age = age_ranges.get('maleMax', 999)
+        if not (min_age <= age <= max_age):
+            return False
+    elif gender == '女性':
+        min_age = age_ranges.get('femaleMin', 0)
+        max_age = age_ranges.get('femaleMax', 999)
+        if not (min_age <= age <= max_age):
+            return False
+    
+    # All three conditions passed
+    return True
+
+
+def _detect_name_type(name):
+    """
+    Detect the type of name (kanji, katakana, hiragana, alpha).
+    Returns the primary type found.
+    """
+    if not name:
+        return 'alpha'
+    
+    # Count different character types
+    kanji_count = 0
+    katakana_count = 0
+    hiragana_count = 0
+    alpha_count = 0
+    
+    for char in name:
+        if '\u4e00' <= char <= '\u9fff':  # CJK Unified Ideographs (Kanji)
+            kanji_count += 1
+        elif '\u30a0' <= char <= '\u30ff':  # Katakana
+            katakana_count += 1
+        elif '\u3040' <= char <= '\u309f':  # Hiragana
+            hiragana_count += 1
+        elif char.isalpha():  # ASCII letters
+            alpha_count += 1
+    
+    # Return the most common type
+    counts = {
+        'kanji': kanji_count,
+        'katakana': katakana_count, 
+        'hiragana': hiragana_count,
+        'alpha': alpha_count
+    }
+    
+    # counts.get may return Optional[int], which can confuse static type checkers
+    # Provide a key function that always returns int (default 0) to be explicit.
+    return max(counts, key=lambda k: counts.get(k, 0))
+
+
+def _find_matching_segment(applicant_detail, segments):
+    """
+    Find the first segment that matches the applicant.
+    Returns the matching segment or None.
+    Segments are already sorted by priority.
+    """
+    for i, segment in enumerate(segments):
+        segment_title = segment.get('title', f'セグメント{i+1}')
+        if _match_segment_conditions(applicant_detail, segment['conditions']):
+            print(f"【{segment_title}】対象。")
+            return segment
+        else:
+            print(f"【{segment_title}】非対象。")
+    return None
+
+
 def send_mail_once(from_addr, app_pass, to_addr, subject, body):
     """Send a single email using SMTP SSL (Gmail compatible).
 
@@ -413,7 +671,20 @@ def send_mail_once(from_addr, app_pass, to_addr, subject, body):
         msg['To'] = to_header
         # Ensure UTF-8 safe subject and body for Japanese text
         msg['Subject'] = str(Header(subject or '', 'utf-8'))
-        msg.set_content(body or '', charset='utf-8')
+        
+        # Check if body contains HTML tags (simple detection)
+        body_content = body or ''
+        is_html = bool(re.search(r'<[^>]+>', body_content))
+        
+        if is_html:
+            # Set HTML content with fallback plain text
+            import html
+            plain_text = html.unescape(re.sub(r'<[^>]+>', '', body_content))
+            msg.set_content(plain_text, charset='utf-8')
+            msg.add_alternative(body_content, subtype='html', charset='utf-8')
+        else:
+            # Plain text content
+            msg.set_content(body_content, charset='utf-8')
         # Use Gmail SMTP by default
         smtp_host = os.environ.get('EMAIL_SMTP_HOST', 'smtp.gmail.com')
         smtp_port = int(os.environ.get('EMAIL_SMTP_PORT', '465'))
@@ -448,16 +719,25 @@ def send_mail_once(from_addr, app_pass, to_addr, subject, body):
         return (False, {'error': str(e), 'traceback': tb})
 
 
-def send_auto_reply_if_configured(uid, ts, is_target, detail, jb=None):
+def _send_html_mail(from_addr, app_pass, to_addr, subject, html_body):
+    """Send HTML email with automatic fallback to plain text.
+    
+    This function specifically handles HTML content from the rich text editor.
+    """
+    return send_mail_once(from_addr, app_pass, to_addr, subject, html_body)
+
+
+def send_auto_reply_if_configured(uid, mail_cfg, is_target, detail, jb=None):
     """If target settings request auto-reply, send mail to candidate.
 
     This helper can be called for both target and non-target candidates.
     """
     try:
-        mail_cfg = ts or {}
+        mail_cfg = mail_cfg or {}
     except Exception:
         mail_cfg = {}
-    auto = bool(mail_cfg.get('autoReply'))
+    # Ensure auto is defined regardless of whether exception occurred above
+    auto = bool(mail_cfg.get('autoReply', False))
     debug = os.environ.get('DEBUG_MAIL', 'false').lower() in ('1', 'true', 'yes')
     if not auto:
         if debug:
@@ -801,6 +1081,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                         remote_accounts = get_jobbox_accounts(uid)
                         match_account = None
                         parsed_name = (parsed.get('account_name') or '').strip()
+                        import re  # Ensure re module is available in this scope
                         def _norm(s):
                             return re.sub(r'\s+', '', (s or '').strip())
                         for ra in remote_accounts:
@@ -976,10 +1257,40 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                             except Exception:
                                                 return False
 
-                                        ts = get_target_settings(uid)
-                                        is_target = evaluate_target(detail, ts)
+                                        # Calculate age from birth date if not present
+                                        if 'age' not in detail or not detail.get('age'):
+                                            birth_str = detail.get('birth', '') or ''
+                                            calculated_age = 0
+                                            if birth_str:
+                                                try:
+                                                    # Try to extract year from birth string (e.g., "1980年1月12日" or "1980年1月12日（45歳）")
+                                                    import re
+                                                    year_match = re.search(r'(\d{4})年', birth_str)
+                                                    if year_match:
+                                                        birth_year = int(year_match.group(1))
+                                                        import datetime
+                                                        current_year = datetime.datetime.now().year
+                                                        calculated_age = current_year - birth_year
+                                                except Exception as e:
+                                                    pass
+                                            
+                                            # Add calculated age to detail
+                                            detail['age'] = calculated_age
+
+                                        # Load all target segments and check if applicant matches any
+                                        segments = _get_target_segments(uid)
+                                        
+                                        matching_segment = _find_matching_segment(detail, segments)
+                                        
+                                        # Determine if applicant is a target (using new segment system)
+                                        is_target = matching_segment is not None
+                                        
                                         if is_target:
-                                            print('この応募者は SMS の送信対象です。')
+                                            print(f'この応募者はSMSの送信対象です。（「{matching_segment["title"]}」セグメントに該当）')
+                                        else:
+                                            print('この応募者はSMSの送信対象ではありません。')
+                                        
+                                        if is_target:
                                             # 读取 api settings，按 provider 路由
                                             api_settings = get_api_settings(uid)
                                             provider = (api_settings.get('provider') or 'sms_publisher')
@@ -1154,23 +1465,11 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 return (True, {'note': 'logged'})
 
                                             tel = detail.get('tel') or detail.get('電話番号') or ''
-                                            # Decide template: respect target settings smsUseA/smsUseB and rotate when both enabled
-                                            def pick_template_for_send(uid, ts):
-                                                useA = True if ts.get('smsTemplateA') else False
-                                                useB = True if ts.get('smsTemplateB') else False
-                                                # If both templates exist, use rotation helper
-                                                if useA and useB:
-                                                    chosen = pick_and_rotate_template(uid)
-                                                    return chosen, ts.get('smsTemplateA') if chosen == 'A' else ts.get('smsTemplateB')
-                                                # only one available
-                                                if useA:
-                                                    return 'A', ts.get('smsTemplateA')
-                                                if useB:
-                                                    return 'B', ts.get('smsTemplateB')
-                                                return None, None
-
-                                            chosen_type, tpl = pick_template_for_send(uid, ts)
-                                            if tel and tpl:
+                                            
+                                            # Use segment's SMS content
+                                            sms_action = matching_segment['actions']['sms']
+                                            tpl = sms_action['text'] if sms_action['enabled'] else None
+                                            if tel and tpl and sms_action['enabled']:
                                                 norm, ok, reason = normalize_phone_number(tel)
                                                 dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
                                                 if not ok:
@@ -1224,7 +1523,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'school': detail.get('school'),
                                                                 'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                                 'status': rec_status,
-                                                                'template': chosen_type,
+                                                                'template': matching_segment.get('title') if matching_segment else 'unknown',
                                                                 'response': info if isinstance(info, dict) else {'note': str(info)},
                                                                 'sentAt': int(time.time())
                                                             }
@@ -1264,14 +1563,51 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                     mail_attempted = False
                                                     mail_ok = False
                                                     mail_info = {}
-                                                    try:
+                                                    # Display email target status using new segment system
+                                                    if is_target:
+                                                        print(f'この応募者はメールの送信対象です。（「{matching_segment["title"]}」セグメントに該当）')
+                                                    else:
+                                                        print('この応募者はメールの送信対象ではありません。')
+                                                    
+                                                    # Send email using segment's mail content
+                                                    mail_attempted = False
+                                                    mail_ok = False
+                                                    mail_info = {}
+                                                    
+                                                    if is_target:
                                                         try:
-                                                            mail_attempted, mail_ok, mail_info = send_auto_reply_if_configured(uid, ts, is_target, detail, jb)
+                                                            mail_action = matching_segment['actions']['mail']
+                                                            if mail_action['enabled'] and mail_action['subject'] and mail_action['body']:
+                                                                to_email = detail.get('email', '').strip()
+                                                                if to_email:
+                                                                    # Get mail settings (sender credentials)
+                                                                    mail_cfg = _get_mail_settings(str(uid) if uid is not None else "")
+                                                                    sender = mail_cfg.get('email', '')
+                                                                    sender_pass = mail_cfg.get('appPass', '')
+                                                                    
+                                                                    if sender and sender_pass:
+                                                                        mail_attempted = True
+                                                                        subject = mail_action['subject']
+                                                                        body = mail_action['body']
+                                                                        
+                                                                        # Send HTML email
+                                                                        mail_ok, mail_info = _send_html_mail(sender, sender_pass, to_email, subject, body)
+                                                                        if mail_ok:
+                                                                            print(f'メール送信成功: {to_email} (件名: {subject})')
+                                                                        else:
+                                                                            print(f'メール送信失敗: {to_email} - {mail_info}')
+                                                                    else:
+                                                                        print('メール設定が不完全です（送信者またはパスワードが不足）')
+                                                                        mail_info = {'error': 'incomplete mail settings'}
+                                                                else:
+                                                                    print('応募者のメールアドレスが見つかりません')
+                                                                    mail_info = {'error': 'no email address'}
+                                                            else:
+                                                                print('メール機能が無効か、件名/本文が設定されていません')
+                                                                mail_info = {'error': 'mail action disabled or incomplete'}
                                                         except Exception as e:
-                                                            mail_attempted, mail_ok, mail_info = (False, False, {'error': str(e)})
-                                                            print('メール送信処理中に例外が発生しました:', e)
-                                                    except Exception:
-                                                        mail_attempted, mail_ok, mail_info = (False, False, {})
+                                                            print(f'メール送信処理中に例外が発生しました: {e}')
+                                                            mail_info = {'error': str(e)}
 
                                                     # Append Jobbox memo entries for SMS and MAIL results (do not overwrite)
                                                     try:
@@ -1280,13 +1616,21 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             try:
                                                                 # Build SMS memo text. Include status code when present.
                                                                 sms_note = 'RPA:SMS:送信済み' if success else 'RPA:SMS:送信失敗'
-                                                                if isinstance(info, dict) and info.get('status_code'):
+                                                                if isinstance(info, dict):
                                                                     try:
-                                                                        sc = int(info.get('status_code'))
-                                                                        if not success:
-                                                                            sms_note = f"RPA:SMS:送信失敗{sc}"
-                                                                        else:
-                                                                            sms_note = f"RPA:SMS:送信済み({sc})"
+                                                                        raw_sc = info.get('status_code')
+                                                                        sc = None
+                                                                        if raw_sc is not None:
+                                                                            # Coerce via str() first to handle unions like str|int|None
+                                                                            try:
+                                                                                sc = int(str(raw_sc))
+                                                                            except Exception:
+                                                                                sc = None
+                                                                        if sc is not None:
+                                                                            if not success:
+                                                                                sms_note = f"RPA:SMS:送信失敗{sc}"
+                                                                            else:
+                                                                                sms_note = f"RPA:SMS:送信済み({sc})"
                                                                     except Exception:
                                                                         pass
                                                                 try:
@@ -1353,11 +1697,18 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                     except Exception as e:
                                                         print('Exception when writing sms_history for missing tel/template:', e)
                                         else:
-                                            print('この応募者は SMS の対象外です。')
+                                            # For non-target applicants, use the old mail system (if configured)
                                             dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
                                             # Mail auto-reply for non-target (if configured)
                                             try:
-                                                send_auto_reply_if_configured(uid, ts, False, detail, jb)
+                                                # Create timestamp for non-target users (if needed) but
+                                                # pass actual mail/target settings dict to send_auto_reply_if_configured
+                                                now_ts = int(time.time())
+                                                try:
+                                                    mail_cfg = get_target_settings(uid)
+                                                except Exception:
+                                                    mail_cfg = {}
+                                                send_auto_reply_if_configured(uid, mail_cfg, False, detail, jb)
                                             except Exception as e:
                                                 print('メール送信処理中に例外が発生しました(対象外):', e)
                                             if not dry_run_env and uid:
@@ -1489,10 +1840,6 @@ def main():
     except Exception:
         poll_seconds = 30
     watch_mail(imap_host, email_user, email_pass, uid=uid, poll_seconds=poll_seconds)
-
-
-if __name__ == '__main__':
-    main()
 
 
 def send_sms_once(uid, to_number, template_type=None, live=False):
@@ -1774,3 +2121,7 @@ def send_sms_once(uid, to_number, template_type=None, live=False):
         except Exception:
             pass
         return (False, {'error': str(e)})
+
+
+if __name__ == '__main__':
+    main()

@@ -18,14 +18,37 @@ export default function DashboardClient() {
   useEffect(() => {
     const today = new Date();
     const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    if (!endDate) setEndDate(fmt(today));
-    if (!startDate) {
-      const s = new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        today.getDate() - 6
-      );
-      setStartDate(fmt(s));
+    // Try restoring from localStorage first so user selection persists across refresh
+    try {
+      const lsStart =
+        typeof window !== "undefined"
+          ? localStorage.getItem("dashboard:startDate")
+          : null;
+      const lsEnd =
+        typeof window !== "undefined"
+          ? localStorage.getItem("dashboard:endDate")
+          : null;
+      if (lsEnd) setEndDate(lsEnd);
+      else if (!endDate) setEndDate(fmt(today));
+      if (lsStart) setStartDate(lsStart);
+      else if (!startDate) {
+        const s = new Date(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate() - 6
+        );
+        setStartDate(fmt(s));
+      }
+    } catch (e) {
+      if (!endDate) setEndDate(fmt(today));
+      if (!startDate) {
+        const s = new Date(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate() - 6
+        );
+        setStartDate(fmt(s));
+      }
     }
     loadStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,20 +128,36 @@ export default function DashboardClient() {
       let sent = 0;
       let failed = 0;
       let targetOut = 0;
+      // Normalize and evaluate statuses. Incoming history may contain Japanese labels like '対象外' or '送信済',
+      // or English-like labels. We'll normalize to lower-case ascii-ish tokens for comparison.
       filteredRows.forEach((r) => {
-        const status = (r.status || "").toString();
-        if (status === "target_out") {
+        const rawStatus = r.status || r.Status || r.status_text || "";
+        const status = String(rawStatus).trim();
+        const statusNorm = status.replace(/\s+/g, "").toLowerCase();
+
+        // Treat various representations of '対象外' (target out)
+        if (
+          statusNorm === "対象外" ||
+          statusNorm === "target_out" ||
+          statusNorm === "対象外" ||
+          statusNorm === "taishougai"
+        ) {
           targetOut += 1;
           return;
         }
-        if (status === "送信済") {
+
+        // Treat explicit '送信済' or strings starting with '送信済' as success
+        if (status === "送信済" || status.startsWith("送信済")) {
           sent += 1;
           return;
         }
+
+        // If status contains a HTTP-ish code, prefer that
         const resp = r.response;
         if (resp !== undefined && resp !== null) {
           if (typeof resp === "object") {
-            const sc = resp.status_code || resp.status || resp.code;
+            const sc =
+              resp.status_code ?? resp.status ?? resp.code ?? resp.codeNumber;
             const scNum = Number(sc);
             if (!Number.isNaN(scNum) && scNum >= 200 && scNum < 300) sent += 1;
             else failed += 1;
@@ -133,6 +172,23 @@ export default function DashboardClient() {
             return;
           }
         }
+
+        // If none of the above matched, fallback: treat Japanese '対象外' that might be in statusNorm
+        if (
+          statusNorm.indexOf("対象外") >= 0 ||
+          statusNorm.indexOf("taishougai") >= 0
+        ) {
+          targetOut += 1;
+          return;
+        }
+
+        // treat strings that mention '送信' and '済' as success
+        if (status.indexOf("送信") >= 0 && status.indexOf("済") >= 0) {
+          sent += 1;
+          return;
+        }
+
+        // Otherwise count as failed
         failed += 1;
       });
 
@@ -244,13 +300,23 @@ export default function DashboardClient() {
           <input
             type="date"
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            onChange={(e) => {
+              setStartDate(e.target.value);
+              try {
+                localStorage.setItem("dashboard:startDate", e.target.value);
+              } catch (err) {}
+            }}
           />
           <label style={{ fontSize: 12, color: "var(--muted)" }}>終了</label>
           <input
             type="date"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={(e) => {
+              setEndDate(e.target.value);
+              try {
+                localStorage.setItem("dashboard:endDate", e.target.value);
+              } catch (err) {}
+            }}
           />
         </div>
         <div
