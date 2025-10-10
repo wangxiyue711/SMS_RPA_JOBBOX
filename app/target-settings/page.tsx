@@ -59,19 +59,147 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       const selection = window.getSelection();
       if (selection && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
-        if (!range.collapsed) {
+        if (range.collapsed) return;
+
+        // helper: find nearest ancestor element that has our custom italic marker
+        const getAncestorWithAttr = (node: Node | null) => {
+          let el: HTMLElement | null = null;
+          if (!node) return null;
+          el =
+            node.nodeType === 3
+              ? (node.parentElement as HTMLElement)
+              : (node as HTMLElement);
+          while (el) {
+            if (el.getAttribute && el.getAttribute("data-custom-italic"))
+              return el;
+            el = el.parentElement;
+          }
+          return null;
+        };
+
+        const startAncestor = getAncestorWithAttr(range.startContainer);
+        const endAncestor = getAncestorWithAttr(range.endContainer);
+
+        // If the whole selection is inside the same custom-italic ancestor -> toggle off
+        if (
+          startAncestor &&
+          startAncestor === endAncestor &&
+          startAncestor.contains(range.startContainer) &&
+          startAncestor.contains(range.endContainer)
+        ) {
+          // If the span has other meaningful styles (e.g. underline), don't unwrap completely.
+          // Instead, remove only the italic-related styles and attribute so underline remains.
+          const spanEl = startAncestor as HTMLElement;
+          const hasOtherStyle = (() => {
+            // consider textDecoration (underline), color, background, etc. as other styles
+            const s = spanEl.style;
+            if (
+              s.textDecoration &&
+              s.textDecoration.indexOf("underline") !== -1
+            )
+              return true;
+            if (
+              s.textDecorationLine &&
+              s.textDecorationLine.indexOf("underline") !== -1
+            )
+              return true;
+            // check commonly used visible styles besides fontStyle/transform
+            if (s.color) return true;
+            if (s.backgroundColor) return true;
+            if (s.fontWeight) return true;
+            return false;
+          })();
+
+          if (hasOtherStyle) {
+            // remove italic-specific styles but keep element
+            spanEl.style.fontStyle = "";
+            spanEl.style.transform = "";
+            spanEl.removeAttribute("data-custom-italic");
+          } else {
+            // fully unwrap
+            const parent = spanEl.parentNode as Node;
+            while (spanEl.firstChild)
+              parent.insertBefore(spanEl.firstChild, spanEl);
+            parent.removeChild(spanEl);
+          }
+
+          selection.removeAllRanges();
+          if (editorRef.current) onChange(editorRef.current.innerHTML);
+          return;
+        }
+
+        // Otherwise: remove any existing custom-italic spans that intersect selection to avoid nesting,
+        // then wrap the selection once with a single custom span.
+        const commonAncestor =
+          range.commonAncestorContainer.nodeType === 3
+            ? (range.commonAncestorContainer as Node).parentElement
+            : (range.commonAncestorContainer as Element);
+        if (commonAncestor) {
+          const existing = (commonAncestor as Element).querySelectorAll(
+            "span[data-custom-italic]"
+          );
+          existing.forEach((s) => {
+            try {
+              if (range.intersectsNode(s)) {
+                const p = s.parentNode as Node;
+                while (s.firstChild) p.insertBefore(s.firstChild, s);
+                p.removeChild(s);
+              }
+            } catch (e) {
+              // ignore
+            }
+          });
+        }
+
+        // wrap selection with a single span
+        const wrapSpan = () => {
           const span = document.createElement("span");
+          span.setAttribute("data-custom-italic", "1");
           span.style.fontStyle = "italic";
           span.style.transform = "skew(-10deg)";
           span.style.display = "inline-block";
+
+          // If selection is inside an element that visually has underline, copy that to our span
           try {
-            range.surroundContents(span);
+            const startEl =
+              range.startContainer.nodeType === 3
+                ? (range.startContainer as Text).parentElement
+                : (range.startContainer as Element);
+            let cur: HTMLElement | null = startEl as HTMLElement | null;
+            let foundUnderline = false;
+            while (cur && cur !== editorRef.current) {
+              const cs = window.getComputedStyle(cur as Element);
+              const td = cs.textDecorationLine || cs.textDecoration || "";
+              if (
+                td.indexOf("underline") !== -1 ||
+                (cur.tagName && cur.tagName.toLowerCase() === "u")
+              ) {
+                foundUnderline = true;
+                break;
+              }
+              cur = cur.parentElement;
+            }
+            if (foundUnderline) {
+              span.style.textDecoration = "underline";
+            }
           } catch (e) {
-            span.appendChild(range.extractContents());
-            range.insertNode(span);
+            // ignore
           }
-          selection.removeAllRanges();
+
+          return span;
+        };
+
+        try {
+          const span = wrapSpan();
+          range.surroundContents(span);
+        } catch (e) {
+          // fallback for complex ranges
+          const span = wrapSpan();
+          const frag = range.extractContents();
+          span.appendChild(frag);
+          range.insertNode(span);
         }
+        selection.removeAllRanges();
       }
     } else {
       document.execCommand(command, false, val);
