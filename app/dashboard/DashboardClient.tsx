@@ -128,68 +128,83 @@ export default function DashboardClient() {
       let sent = 0;
       let failed = 0;
       let targetOut = 0;
-      // Normalize and evaluate statuses. Incoming history may contain Japanese labels like '対象外' or '送信済',
-      // or English-like labels. We'll normalize to lower-case ascii-ish tokens for comparison.
-      filteredRows.forEach((r) => {
+
+      // Helper: determine row result category
+      // returns { category: 'sent'|'failed'|'targetOut', code?: number|string }
+      const detectRowResult = (r: any) => {
         const rawStatus = r.status || r.Status || r.status_text || "";
-        const status = String(rawStatus).trim();
+        const status = String(rawStatus || "").trim();
         const statusNorm = status.replace(/\s+/g, "").toLowerCase();
 
-        // Treat various representations of '対象外' (target out)
+        // If explicitly target-out
         if (
           statusNorm === "対象外" ||
           statusNorm === "target_out" ||
-          statusNorm === "対象外" ||
-          statusNorm === "taishougai"
-        ) {
-          targetOut += 1;
-          return;
-        }
-
-        // Treat explicit '送信済' or strings starting with '送信済' as success
-        if (status === "送信済" || status.startsWith("送信済")) {
-          sent += 1;
-          return;
-        }
-
-        // If status contains a HTTP-ish code, prefer that
-        const resp = r.response;
-        if (resp !== undefined && resp !== null) {
-          if (typeof resp === "object") {
-            const sc =
-              resp.status_code ?? resp.status ?? resp.code ?? resp.codeNumber;
-            const scNum = Number(sc);
-            if (!Number.isNaN(scNum) && scNum >= 200 && scNum < 300) sent += 1;
-            else failed += 1;
-            return;
-          } else {
-            const scNum = Number(resp);
-            if (!Number.isNaN(scNum) && scNum >= 200 && scNum < 300) sent += 1;
-            else {
-              if (String(resp).indexOf("200") >= 0) sent += 1;
-              else failed += 1;
-            }
-            return;
-          }
-        }
-
-        // If none of the above matched, fallback: treat Japanese '対象外' that might be in statusNorm
-        if (
           statusNorm.indexOf("対象外") >= 0 ||
           statusNorm.indexOf("taishougai") >= 0
         ) {
-          targetOut += 1;
-          return;
+          return { category: "targetOut" };
         }
 
-        // treat strings that mention '送信' and '済' as success
-        if (status.indexOf("送信") >= 0 && status.indexOf("済") >= 0) {
-          sent += 1;
-          return;
+        // If status explicitly says sent
+        if (
+          status === "送信済" ||
+          status.startsWith("送信済") ||
+          (status.indexOf("送信") >= 0 && status.indexOf("済") >= 0)
+        ) {
+          return { category: "sent" };
         }
 
-        // Otherwise count as failed
-        failed += 1;
+        // Inspect response for numeric HTTP-like status codes
+        const resp = r.response;
+        if (resp !== undefined && resp !== null) {
+          try {
+            if (typeof resp === "object") {
+              const sc =
+                resp.status_code ?? resp.status ?? resp.code ?? resp.codeNumber;
+              const scNum = Number(sc);
+              if (!Number.isNaN(scNum)) {
+                if (scNum >= 200 && scNum < 300)
+                  return { category: "sent", code: scNum };
+                return { category: "failed", code: scNum };
+              }
+              // fallback: try to find any 200 substring
+              const asStr = JSON.stringify(resp || "");
+              if (asStr.indexOf("200") >= 0) return { category: "sent" };
+              return { category: "failed", code: asStr };
+            } else {
+              const scNum = Number(resp);
+              if (!Number.isNaN(scNum)) {
+                if (scNum >= 200 && scNum < 300)
+                  return { category: "sent", code: scNum };
+                return { category: "failed", code: scNum };
+              }
+              const s = String(resp || "");
+              if (s.indexOf("200") >= 0) return { category: "sent" };
+              return { category: "failed", code: s };
+            }
+          } catch (e) {
+            return { category: "failed", code: String(e) };
+          }
+        }
+
+        // If no status and no response => targetOut
+        const hasStatus =
+          r.status !== undefined &&
+          r.status !== null &&
+          String(r.status).trim() !== "";
+        const hasResponse = r.response !== undefined && r.response !== null;
+        if (!hasStatus && !hasResponse) return { category: "targetOut" };
+
+        // If we have a status but none of the above matched, treat as failed by default
+        return { category: "failed" };
+      };
+
+      filteredRows.forEach((r) => {
+        const res = detectRowResult(r);
+        if (res.category === "sent") sent += 1;
+        else if (res.category === "targetOut") targetOut += 1;
+        else failed += 1;
       });
 
       const startSec =

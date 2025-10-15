@@ -37,6 +37,15 @@ class JobboxLogin:
         parts = s.split("'")
         return "concat(" + ",\"'\",".join([f"'{p}'" for p in parts]) + ")"
 
+    def _is_driver_alive(self) -> bool:
+        """检查 WebDriver 会话是否仍然活跃"""
+        try:
+            # 尝试获取当前窗口句柄，这是一个简单的操作来测试连接
+            self.driver.current_window_handle
+            return True
+        except Exception:
+            return False
+
     def _maybe_switch_iframe(self) -> bool:
         frames = self.driver.find_elements(By.CSS_SELECTOR, "iframe")
         for f in frames:
@@ -403,6 +412,10 @@ return 'NOT_FOUND';
         }
 
     def set_memo_and_save(self, memo_text: str = '送信済み'):
+        # 检查 WebDriver 是否仍然活跃
+        if not self._is_driver_alive():
+            raise Exception('WebDriver セッションが無効です。ブラウザが閉じられた可能性があります。')
+        
         # 尝试找到メモ（textarea/input）并填写，然后点击「選考情報を更新する」按钮保存
         try:
             # 优先找 textarea 或可编辑 div，兼容多种页面结构

@@ -12,6 +12,7 @@ import requests
 import json
 import base64
 from typing import Optional
+import unicodedata
 
 
 def prompt_input(prompt, default=None):
@@ -19,6 +20,22 @@ def prompt_input(prompt, default=None):
         v = input(f"{prompt} [{default}]: ")
         return v.strip() or default
     return input(f"{prompt}: ").strip()
+
+
+def safe_set_memo_and_save(jb, memo_text, context=""):
+    """安全地保存memo，处理WebDriverセッション错误"""
+    try:
+        jb.set_memo_and_save(memo_text)
+        return True
+    except Exception as e:
+        error_msg = str(e)
+        if 'HTTPConnectionPool' in error_msg and 'Max retries exceeded' in error_msg:
+            print(f'メモ保存{context}時にWebDriverセッションエラーが発生しました: ブラウザが閉じられた可能性があります')
+        elif 'WebDriver セッションが無効です' in error_msg:
+            print(f'メモ保存{context}時にWebDriverセッションが無効になりました: ブラウザが閉じられた可能性があります')
+        else:
+            print(f'メモ保存{context}時に例外が発生しました: {e}')
+        return False
 
 
 def decode_subject(raw):
@@ -1082,11 +1099,32 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                         match_account = None
                         parsed_name = (parsed.get('account_name') or '').strip()
                         import re  # Ensure re module is available in this scope
-                        def _norm(s):
-                            return re.sub(r'\s+', '', (s or '').strip())
+
+                        def _norm(s: str) -> str:
+                            """Normalize a company/account name for exact comparison.
+
+                            - Unicode NFKC normalize to unify full/half width
+                            - remove all whitespace
+                            - lower-case ASCII
+                            Do NOT strip company suffixes and DO NOT use contains-based matching.
+                            """
+                            if not s:
+                                return ''
+                            t = unicodedata.normalize('NFKC', s)
+                            t = re.sub(r"\s+", '', t)
+                            try:
+                                t = t.lower()
+                            except Exception:
+                                pass
+                            return t
+
+                        parsed_norm = _norm(parsed_name)
+
+                        # Only accept exact normalized match. No suffix stripping, no contains.
                         for ra in remote_accounts:
-                            ra_name = ra.get('account_name')
-                            if _norm(ra_name) == _norm(parsed_name) or _norm(ra_name) in _norm(parsed_name) or _norm(parsed_name) in _norm(ra_name):
+                            ra_name = ra.get('account_name') or ''
+                            ra_norm = _norm(ra_name)
+                            if ra_norm and ra_norm == parsed_norm:
                                 match_account = ra
                                 break
 
@@ -1283,14 +1321,33 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                         matching_segment = _find_matching_segment(detail, segments)
                                         
                                         # Determine if applicant is a target (using new segment system)
-                                        is_target = matching_segment is not None
+                                        # Check separately for SMS and mail targets
+                                        sms_target_segment = None
+                                        mail_target_segment = None
                                         
-                                        if is_target:
-                                            print(f'この応募者はSMSの送信対象です。（「{matching_segment["title"]}」セグメントに該当）')
+                                        if matching_segment:
+                                            # Check if this segment has SMS enabled
+                                            if matching_segment['actions']['sms']['enabled']:
+                                                sms_target_segment = matching_segment
+                                            # Check if this segment has mail enabled  
+                                            if matching_segment['actions']['mail']['enabled']:
+                                                mail_target_segment = matching_segment
+                                        
+                                        # For backward compatibility, keep is_target for SMS logic
+                                        is_target = sms_target_segment is not None
+                                        
+                                        if sms_target_segment:
+                                            print(f'この応募者はSMSの送信対象です。（「{sms_target_segment["title"]}」セグメントに該当）')
                                         else:
                                             print('この応募者はSMSの送信対象ではありません。')
                                         
-                                        if is_target:
+                                        if mail_target_segment:
+                                            print(f'この応募者はメールの送信対象です。（「{mail_target_segment["title"]}」セグメントに該当）')
+                                        else:
+                                            print('この応募者はメールの送信対象ではありません。')
+                                        
+                                        # Handle SMS sending
+                                        if sms_target_segment:
                                             # 读取 api settings，按 provider 路由
                                             api_settings = get_api_settings(uid)
                                             provider = (api_settings.get('provider') or 'sms_publisher')
@@ -1465,11 +1522,16 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 return (True, {'note': 'logged'})
 
                                             tel = detail.get('tel') or detail.get('電話番号') or ''
+                                            # Ensure mail-related flags are initialized so later memo writing
+                                            # does not reference undefined locals (UnboundLocalError).
+                                            mail_attempted = False
+                                            mail_ok = False
+                                            mail_info = {}
                                             
                                             # Use segment's SMS content
-                                            sms_action = matching_segment['actions']['sms']
+                                            sms_action = sms_target_segment['actions']['sms']
                                             tpl = sms_action['text'] if sms_action['enabled'] else None
-                                            if tel and tpl and sms_action['enabled']:
+                                            if tel and tpl and sms_target_segment and sms_action['enabled']:
                                                 norm, ok, reason = normalize_phone_number(tel)
                                                 dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
                                                 if not ok:
@@ -1523,7 +1585,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'school': detail.get('school'),
                                                                 'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                                 'status': rec_status,
-                                                                'template': matching_segment.get('title') if matching_segment else 'unknown',
+                                                                'template': sms_target_segment.get('title') if sms_target_segment else 'unknown',
                                                                 'response': info if isinstance(info, dict) else {'note': str(info)},
                                                                 'sentAt': int(time.time())
                                                             }
@@ -1559,119 +1621,75 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                     status_code = None
                                                         except Exception:
                                                             status_code = None
-                                                    # Mail auto-reply (for target as well): call and capture result
-                                                    mail_attempted = False
-                                                    mail_ok = False
-                                                    mail_info = {}
-                                                    # Display email target status using new segment system
-                                                    if is_target:
-                                                        print(f'この応募者はメールの送信対象です。（「{matching_segment["title"]}」セグメントに該当）')
-                                                    else:
-                                                        print('この応募者はメールの送信対象ではありません。')
-                                                    
-                                                    # Send email using segment's mail content
-                                                    mail_attempted = False
-                                                    mail_ok = False
-                                                    mail_info = {}
-                                                    
-                                                    if is_target:
-                                                        try:
-                                                            mail_action = matching_segment['actions']['mail']
-                                                            if mail_action['enabled'] and mail_action['subject'] and mail_action['body']:
-                                                                to_email = detail.get('email', '').strip()
-                                                                if to_email:
-                                                                    # Get mail settings (sender credentials)
-                                                                    mail_cfg = _get_mail_settings(str(uid) if uid is not None else "")
-                                                                    sender = mail_cfg.get('email', '')
-                                                                    sender_pass = mail_cfg.get('appPass', '')
-                                                                    
-                                                                    if sender and sender_pass:
-                                                                        mail_attempted = True
-                                                                        subject = mail_action['subject']
-                                                                        body = mail_action['body']
-                                                                        
-                                                                        # Send HTML email
-                                                                        mail_ok, mail_info = _send_html_mail(sender, sender_pass, to_email, subject, body)
-                                                                        if mail_ok:
-                                                                            print(f'メール送信成功: {to_email} (件名: {subject})')
-                                                                        else:
-                                                                            print(f'メール送信失敗: {to_email} - {mail_info}')
-                                                                    else:
-                                                                        print('メール設定が不完全です（送信者またはパスワードが不足）')
-                                                                        mail_info = {'error': 'incomplete mail settings'}
-                                                                else:
-                                                                    print('応募者のメールアドレスが見つかりません')
-                                                                    mail_info = {'error': 'no email address'}
-                                                            else:
-                                                                print('メール機能が無効か、件名/本文が設定されていません')
-                                                                mail_info = {'error': 'mail action disabled or incomplete'}
-                                                        except Exception as e:
-                                                            print(f'メール送信処理中に例外が発生しました: {e}')
-                                                            mail_info = {'error': str(e)}
 
-                                                    # Append Jobbox memo entries for SMS and MAIL results (do not overwrite)
+
+                                                    # Collect memo lines and write a single combined memo for this applicant
                                                     try:
-                                                        # SMS memo: only when candidate is target, and not dry-run
-                                                        if is_target and (not dry_run_env):
-                                                            try:
-                                                                # Build SMS memo text. Include status code when present.
-                                                                sms_note = 'RPA:SMS:送信済み' if success else 'RPA:SMS:送信失敗'
-                                                                if isinstance(info, dict):
-                                                                    try:
-                                                                        raw_sc = info.get('status_code')
-                                                                        sc = None
-                                                                        if raw_sc is not None:
-                                                                            # Coerce via str() first to handle unions like str|int|None
-                                                                            try:
-                                                                                sc = int(str(raw_sc))
-                                                                            except Exception:
-                                                                                sc = None
-                                                                        if sc is not None:
-                                                                            if not success:
-                                                                                sms_note = f"RPA:SMS:送信失敗{sc}"
-                                                                            else:
-                                                                                sms_note = f"RPA:SMS:送信済み({sc})"
-                                                                    except Exception:
-                                                                        pass
-                                                                try:
-                                                                    if jb:
-                                                                        jb.set_memo_and_save(sms_note)
-                                                                except Exception as e:
-                                                                    print('メモ保存(SMS)時に例外が発生しました:', e)
-                                                            except Exception:
-                                                                pass
+                                                        memo_lines = []
+                                                        # Determine label/title to use: prefer sms_target_segment title, else mail_target_segment title, else None
+                                                        label = None
+                                                        try:
+                                                            if sms_target_segment and sms_target_segment.get('title'):
+                                                                label = sms_target_segment.get('title')
+                                                            elif mail_target_segment and mail_target_segment.get('title'):
+                                                                label = mail_target_segment.get('title')
+                                                        except Exception:
+                                                            label = None
 
-                                                        # MAIL memo: if mail was attempted (real attempt) and not dry-run, record result
-                                                        if mail_attempted and (not os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')):
-                                                            try:
-                                                                mail_note = 'RPA:メール:送信済み' if mail_ok else 'RPA:メール:送信失敗'
-                                                                # Try to extract a concise note from mail_info
-                                                                info_snip = ''
-                                                                try:
+                                                        # SMS result
+                                                        try:
+                                                            if is_target:
+                                                                if success:
+                                                                    sms_result = 'sms送信済'
+                                                                else:
+                                                                    # try to include status code if available
+                                                                    sc = None
+                                                                    if isinstance(info, dict):
+                                                                        try:
+                                                                            raw_sc = info.get('status_code')
+                                                                            if raw_sc is not None:
+                                                                                sc = int(str(raw_sc))
+                                                                        except Exception:
+                                                                            sc = None
+                                                                    sms_result = f'sms送信失敗{sc}' if sc is not None else 'sms送信失敗'
+                                                            else:
+                                                                sms_result = 'sms未送信'
+                                                        except Exception:
+                                                            sms_result = 'sms未送信'
+
+                                                        # Mail result
+                                                        try:
+                                                            if mail_attempted:
+                                                                if mail_ok:
+                                                                    mail_result = 'mail送信済'
+                                                                else:
+                                                                    # try to include code or error
+                                                                    mail_code = None
                                                                     if isinstance(mail_info, dict):
-                                                                        info_snip = mail_info.get('note') or mail_info.get('error') or str(mail_info.get('status_code', ''))
-                                                                        if info_snip and isinstance(info_snip, dict):
-                                                                            info_snip = ''
-                                                                    else:
-                                                                        info_snip = str(mail_info)
-                                                                except Exception:
-                                                                    info_snip = ''
-                                                                if info_snip:
-                                                                    mail_note = f"{mail_note} ({info_snip})"
-                                                                try:
-                                                                    if jb:
-                                                                        jb.set_memo_and_save(mail_note)
-                                                                except Exception as e:
-                                                                    print('メモ保存(MAIL)時に例外が発生しました:', e)
-                                                            except Exception:
-                                                                pass
+                                                                        mail_code = mail_info.get('status_code') or mail_info.get('code') or mail_info.get('error')
+                                                                    elif mail_info is not None:
+                                                                        mail_code = str(mail_info)
+                                                                    mail_result = f'mail送信失敗{mail_code}' if mail_code else 'mail送信失敗'
+                                                            else:
+                                                                mail_result = 'mail未送信'
+                                                        except Exception:
+                                                            mail_result = 'mail未送信'
+
+                                                        # If no label matched, write '対象外'
+                                                        if not label:
+                                                            memo_text = '対象外'
+                                                        else:
+                                                            ts = time.localtime()
+                                                            ts_str = time.strftime('%Y/%m/%d, %H:%M', ts)
+                                                            memo_text = f"【{label}】：{sms_result}/{mail_result}，{ts_str}"
+
+                                                        try:
+                                                            if 'jb' in locals() and jb:
+                                                                safe_set_memo_and_save(jb, memo_text, '(まとめ)')
+                                                        except Exception as e:
+                                                            print('メモ保存(まとめ)時に例外が発生しました:', e)
                                                     except Exception as e:
-                                                        print('メモ追記処理で例外:', e)
-                                            # Ensure jb is closed after processing this match_account
-                                            try:
-                                                jb.close()
-                                            except Exception:
-                                                pass
+                                                        print('合并メモ処理で例外:', e)
                                             # If tel or template was missing, record that fact (do not run this when we successfully sent above)
                                             if not (tel and tpl):
                                                 print('電話番号またはテンプレートが不足しているため、SMSは送信されませんでした。')
@@ -1696,6 +1714,81 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             print('Failed to write sms_history for missing tel/template')
                                                     except Exception as e:
                                                         print('Exception when writing sms_history for missing tel/template:', e)
+                                        
+                                        # Handle Mail sending (independent of SMS)
+                                        mail_attempted = False
+                                        mail_ok = False
+                                        mail_info = {}
+                                        
+                                        if mail_target_segment:
+                                            try:
+                                                mail_action = mail_target_segment['actions']['mail']
+                                                print(f'[DEBUG] mail_action: enabled={mail_action.get("enabled")}, subject="{mail_action.get("subject")}", body_length={len(mail_action.get("body", ""))}')
+                                                if mail_action['enabled'] and mail_action['subject'] and mail_action['body']:
+                                                    to_email = detail.get('email', '').strip()
+                                                    print(f'[DEBUG] 応募者のメールアドレス: {to_email}')
+                                                    if to_email:
+                                                        # Get mail settings (sender credentials)
+                                                        mail_cfg = _get_mail_settings(str(uid) if uid is not None else "")
+                                                        sender = mail_cfg.get('email', '')
+                                                        sender_pass = mail_cfg.get('appPass', '')
+                                                        print(f'[DEBUG] 送信者設定: sender={sender}, sender_pass={"*" * len(sender_pass) if sender_pass else "None"}')
+                                                        
+                                                        if sender and sender_pass:
+                                                            mail_attempted = True
+                                                            subject = mail_action['subject']
+                                                            body = mail_action['body']
+                                                            
+                                                            # Check if DRY_RUN_MAIL is enabled
+                                                            mail_dry = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
+                                                            if mail_dry:
+                                                                print(f'[DRY_RUN_MAIL] would send mail from={sender} to={to_email} subj={subject}')
+                                                                mail_ok, mail_info = True, {'note': 'dry_run'}
+                                                            else:
+                                                                # Send HTML email
+                                                                mail_ok, mail_info = _send_html_mail(sender, sender_pass, to_email, subject, body)
+                                                            if mail_ok:
+                                                                print(f'メール送信成功: {to_email} (件名: {subject})')
+                                                            else:
+                                                                print(f'メール送信失敗: {to_email} - {mail_info}')
+                                                        else:
+                                                            print('メール設定が不完全です（送信者またはパスワードが不足）')
+                                                            mail_info = {'error': 'incomplete mail settings'}
+                                                    else:
+                                                        print('応募者のメールアドレスが見つかりません')
+                                                        mail_info = {'error': 'no email address'}
+                                                else:
+                                                    print('メール機能が無効か、件名/本文が設定されていません')
+                                                    mail_info = {'error': 'mail action disabled or incomplete'}
+                                            except Exception as e:
+                                                print(f'メール送信処理中に例外が発生しました: {e}')
+                                                mail_info = {'error': str(e)}
+                                        
+                                        # Add mail memo if mail was attempted and not in dry-run mode
+                                        if mail_attempted and (not os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')):
+                                            try:
+                                                mail_note = 'RPA:メール:送信済み' if mail_ok else 'RPA:メール:送信失敗'
+                                                # Try to extract a concise note from mail_info
+                                                info_snip = ''
+                                                try:
+                                                    if isinstance(mail_info, dict):
+                                                        info_snip = mail_info.get('note') or mail_info.get('error') or str(mail_info.get('status_code', ''))
+                                                        if info_snip and isinstance(info_snip, dict):
+                                                            info_snip = ''
+                                                    else:
+                                                        info_snip = str(mail_info)
+                                                except Exception:
+                                                    info_snip = ''
+                                                if info_snip:
+                                                    mail_note = f"{mail_note} ({info_snip})"
+                                                try:
+                                                    if 'jb' in locals() and jb:
+                                                        safe_set_memo_and_save(jb, mail_note, '(MAIL)')
+                                                except Exception as e:
+                                                    print('メモ保存(MAIL)時に例外が発生しました:', e)
+                                            except Exception as e:
+                                                print('メール memo 処理で例外:', e)
+                                        
                                         else:
                                             # For non-target applicants, use the old mail system (if configured)
                                             dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
@@ -1734,14 +1827,18 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 # 写入 Jobbox メモ为「RPA:対象外」，如果我们仍然持有 jb 会话且不是 dry-run
                                                 try:
                                                     if (not dry_run_env) and 'jb' in locals() and jb:
-                                                        try:
-                                                            jb.set_memo_and_save('RPA:対象外')
-                                                        except Exception as e:
-                                                            print('メモ保存(対象外)時に例外が発生しました:', e)
+                                                        safe_set_memo_and_save(jb, 'RPA:対象外', '(対象外)')
                                                 except Exception:
                                                     pass
                                 except Exception as e:
                                     print(f'対象判定中に例外が発生しました: {e}')
+                                
+                                # Ensure jb is closed after all memo operations are completed
+                                try:
+                                    if 'jb' in locals() and jb:
+                                        jb.close()
+                                except Exception:
+                                    pass
                 else:
                     # 非求人ボックス邮件，保持未读（不 fetch full body），不标记
                     pass

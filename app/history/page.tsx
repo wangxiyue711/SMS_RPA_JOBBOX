@@ -200,26 +200,58 @@ export default function HistoryPage() {
 
       const result = (() => {
         const hasStatus =
-          r.status !== undefined && r.status !== null && r.status !== "";
+          r.status !== undefined &&
+          r.status !== null &&
+          String(r.status).trim() !== "";
         const hasResponse = r.response !== undefined && r.response !== null;
+
+        // If neither status nor response -> target out
         if (!hasStatus && !hasResponse) return "対象外";
-        if (hasStatus) {
-          try {
-            const s = String(r.status || "");
-            if (s === "target_out") return "対象外";
-          } catch (e) {}
-          return String(r.status);
-        }
+
+        // If status indicates sent explicitly
+        try {
+          const s = String(r.status || "").trim();
+          if (
+            s === "送信済" ||
+            s.startsWith("送信済") ||
+            (s.indexOf("送信") >= 0 && s.indexOf("済") >= 0)
+          )
+            return "送信済";
+          if (s === "target_out") return "対象外";
+        } catch (e) {}
+
+        // Inspect response for success/failed
         try {
           if (typeof r.response === "object" && r.response !== null) {
             const sc =
-              r.response.status_code || r.response.status || r.response.code;
-            if (sc !== undefined && sc !== null && sc !== "") return String(sc);
+              r.response.status_code ||
+              r.response.status ||
+              r.response.code ||
+              r.response.codeNumber;
+            const scNum = Number(sc);
+            if (!Number.isNaN(scNum) && scNum >= 200 && scNum < 300)
+              return "送信済";
+            if (!Number.isNaN(scNum)) return `送信失敗${scNum}`;
+            const asStr = JSON.stringify(r.response || "");
+            if (asStr.indexOf("200") >= 0) return "送信済";
+            return `送信失敗${asStr}`;
           }
-          if (typeof r.response === "string" || typeof r.response === "number")
-            return String(r.response);
+          if (
+            typeof r.response === "string" ||
+            typeof r.response === "number"
+          ) {
+            const scNum = Number(r.response);
+            if (!Number.isNaN(scNum) && scNum >= 200 && scNum < 300)
+              return "送信済";
+            const s = String(r.response);
+            if (s.indexOf("200") >= 0) return "送信済";
+            return `送信失敗${s}`;
+          }
         } catch (e) {}
-        return "";
+
+        // Fallback: if status existed but didn't indicate sent, return it; otherwise treat as failed
+        if (hasStatus) return String(r.status);
+        return "送信失敗";
       })();
 
       return [
