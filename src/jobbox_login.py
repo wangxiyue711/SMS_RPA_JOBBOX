@@ -390,6 +390,153 @@ return 'NOT_FOUND';
         if oubo_no_extracted and oubo_no_extracted != oubo_no_val:
             print(f"応募No.(抽出): {oubo_no_extracted}")
         print(f"応募求人: {kyujin}")
+        
+        # 新增：获取勤務先名（会社名）
+        employer_name = ''
+        current_url = self.driver.current_url  # 保存当前页面URL以便返回
+        
+        try:
+            print("=== 勤務先名を取得中 ===")
+            
+            # 応募求人のリンクを検索
+            # 画像によると、このリンクは通常応募求人フィールドの近くにあり、kyujinと同じテキストを含む
+            job_link_selectors = [
+                # 応募求人エリアのリンクを検索
+                f"//a[contains(text(), '{kyujin}') and contains(@href, '/')]" if kyujin else None,
+                "//a[contains(@class, 'job') or contains(@class, 'kyujin')]",
+                "//*[contains(.,'応募求人')]/following-sibling::*//a",
+                "//*[contains(.,'応募求人')]/following::a[1]",
+                # 求人タイトルを含む青いリンクを検索
+                "//a[contains(@style, 'color') or contains(@class, 'blue') or contains(@class, 'link')]"
+            ]
+            
+            job_link = None
+            for selector in job_link_selectors:
+                if not selector:
+                    continue
+                try:
+                    links = self.driver.find_elements(By.XPATH, selector)
+                    for link in links:
+                        if link.is_displayed() and link.is_enabled():
+                            link_text = link.text.strip()
+                            # リンクテキストが求人情報を含むか、有効なリンクかチェック
+                            if link_text and (len(link_text) > 5 or kyujin in link_text):
+                                job_link = link
+                                print(f"応募求人リンクが見つかりました: {link_text}")
+                                break
+                    if job_link:
+                        break
+                except Exception as e:
+                    continue
+            
+            if job_link:
+                # リンクをクリックして職位詳細ページに移動
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", job_link)
+                try:
+                    job_link.click()
+                except:
+                    self.driver.execute_script("arguments[0].click();", job_link)
+                
+                # ページロードを待機
+                time.sleep(2)
+                self._wait(lambda d: d.execute_script('return document.readyState')=='complete', 15)
+                
+                # 職位詳細ページで勤務先名を検索
+                # 成功実績のあるセレクターを先頭に配置
+                employer_selectors = [
+                    # 成功したパターンを最初に試行
+                    "//*[contains(.,'勤務先名')]/following-sibling::*[1][not(contains(.,'必須'))]",
+                    "//*[contains(.,'勤務先名')]/following::*[1][not(contains(.,'必須'))][text()]",
+                    # バックアップセレクター
+                    "//dt[contains(.,'勤務先名')]/following-sibling::dd[1]",
+                    "//th[normalize-space(.)='勤務先名']/following-sibling::td[1]",
+                    "//td[normalize-space(.)='勤務先名']/following-sibling::td[1]",
+                    # 入力フィールド向けセレクター
+                    "//label[contains(.,'勤務先名')]/following-sibling::input[1]/@value",
+                    "//label[contains(.,'勤務先名')]/following-sibling::*[1]/input[1]/@value", 
+                    "//label[contains(.,'勤務先名')]/following-sibling::*[1]//input[1]/@value",
+                    "//*[contains(.,'勤務先名')]/ancestor::*[1]//input[@value and @value!='']/@value",
+                    "//*[contains(.,'勤務先名')]/parent::*//input[@value and @value!='']/@value",
+                    # 企業名・会社名の別名も対応
+                    "//th[contains(.,'企業名')]/following-sibling::td[1]", 
+                    "//th[contains(.,'会社名')]/following-sibling::td[1]",
+                    "//*[contains(.,'企業名')]/following::*[1][not(contains(.,'必須'))]",
+                    "//*[contains(.,'会社名')]/following::*[1][not(contains(.,'必須'))]"
+                ]
+                
+                for selector in employer_selectors:
+                    try:
+                        # 判断是否是属性选择器
+                        if selector.endswith('/@value'):
+                            # 属性选择器，需要使用不同的方法获取值
+                            element_selector = selector.replace('/@value', '')
+                            el = self._wait_xpath(element_selector, 3, visible=True)
+                            if el:
+                                employer_name = el.get_attribute('value') or ''
+                                employer_name = employer_name.strip()
+                                if employer_name and employer_name != '必須' and len(employer_name) > 1:
+                                    print(f"勤務先名 (属性から取得): {employer_name}")
+                                    break
+                        else:
+                            # 文本选择器
+                            el = self._wait_xpath(selector, 3, visible=True)
+                            if el:
+                                # 尝试多种方式获取文本
+                                employer_name = el.text.strip() if el.text else ''
+                                # 如果没有文本，尝试获取value属性
+                                if not employer_name:
+                                    employer_name = (el.get_attribute('value') or '').strip()
+                                # 如果还是空，尝试获取innerText
+                                if not employer_name:
+                                    try:
+                                        employer_name = self.driver.execute_script("return arguments[0].innerText || arguments[0].textContent || '';", el).strip()
+                                    except:
+                                        pass
+                                
+                                # 取得した内容が有効かどうかを検証
+                                if employer_name and employer_name != '必須' and len(employer_name) > 1:
+                                    print(f"勤務先名 (テキストから取得): {employer_name}")
+                                    break
+                    except Exception as e:
+                        print(f"セレクター試行エラー: {selector} - {e}")
+                        continue
+                
+                if not employer_name:
+                    print("職位詳細ページで勤務先名が見つかりませんでした")
+                    # デバッグ情報：ページ上の「勤務先」を含む全要素を出力
+                    try:
+                        print("=== デバッグ：ページ上の'勤務先'を含む全要素 ===")
+                        debug_elements = self.driver.find_elements(By.XPATH, "//*[contains(.,'勤務先')]")
+                        for i, elem in enumerate(debug_elements[:10]):  # 出力を最初の10個に制限
+                            try:
+                                tag = elem.tag_name
+                                text = elem.text[:50] if elem.text else ''  # テキスト長を制限
+                                value = elem.get_attribute('value') or ''
+                                print(f"要素{i+1}: <{tag}> text='{text}' value='{value}'")
+                            except:
+                                pass
+                        print("=== デバッグ終了 ===")
+                    except Exception as debug_e:
+                        print(f"デバッグ情報取得エラー: {debug_e}")
+                
+                # 個人情報ページに戻る
+                print("個人情報ページに戻ります...")
+                self.driver.get(current_url)
+                time.sleep(1.5)
+                self._wait(lambda d: d.execute_script('return document.readyState')=='complete', 15)
+                
+            else:
+                print("応募求人のリンクが見つかりませんでした")
+                
+        except Exception as e:
+            print(f"勤務先名取得エラー: {e}")
+            # エラー時は元のページに戻る
+            try:
+                self.driver.get(current_url)
+                time.sleep(1)
+            except:
+                pass
+        
         print("==================\n")
     
         # 更宽松的匹配逻辑：比较原始字段归一化、抽取出的No.归一化，或包含关系
@@ -408,7 +555,8 @@ return 'NOT_FOUND';
         return {
             "name": name, "gender": gender, "birth": birth, "email": email, "tel": tel,
             "addr": addr, "school": school, "oubo_dt": oubo_dt, "kyujin": kyujin,
-            "oubo_no": oubo_no_val, "oubo_no_extracted": oubo_no_extracted, "oubo_no_ok": oubo_no_ok
+            "oubo_no": oubo_no_val, "oubo_no_extracted": oubo_no_extracted, "oubo_no_ok": oubo_no_ok,
+            "employer_name": employer_name  # 新增勤務先名
         }
 
     def set_memo_and_save(self, memo_text: str = '送信済み'):
@@ -599,6 +747,8 @@ return 'NOT_FOUND';
         if detail.get('oubo_no_extracted'):
             print(f"応募No.(抽出): {detail.get('oubo_no_extracted')}")
         print(f"応募求人: {detail.get('kyujin','')}")
+        if detail.get('employer_name'):
+            print(f"勤務先名: {detail.get('employer_name','')}")
         print("==================\n")
 
     def close(self):

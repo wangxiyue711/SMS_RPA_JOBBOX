@@ -85,12 +85,18 @@ def parse_jobbox_body(body):
         m = re.search(r'応募No.?[:：\s]*([A-Za-z0-9\-]+)', body)
     if m:
         oubo_no = m.group(1).strip()
+    # 提取掲載企業名 / 企業名 / 掲載会社 等表示发布企业名的字段
+    employer_name = ''
+    m = re.search(r'【?(?:掲載企業名|企業名|掲載会社)】?[:：\s]*\s*(.+)', body)
+    if m:
+        employer_name = m.group(1).strip()
     return {
         'account_name': account_name,
         'account_id': account_id,
         'job_title': job_title,
         'url': url,
-        'oubo_no': oubo_no
+        'oubo_no': oubo_no,
+        'employer_name': employer_name
     }
 
 
@@ -524,6 +530,79 @@ def _extract_mail_action(mail_field):
     return {}
 
 
+def apply_template_tokens(template_text: str, data_map: dict) -> str:
+    """Replace template tokens like {{applicant_name}}, {{job_title}}, {{company}}.
+
+    - data_map: dict that may contain keys 'applicant_name', 'job_title', 'company' or
+      their synonyms. Values will be stringified. If template contains HTML tags,
+      inserted values will be HTML-escaped to avoid injecting raw HTML.
+    """
+    if not template_text:
+        return template_text
+    try:
+        import html as _html
+    except Exception:
+        _html = None
+
+    text = str(template_text)
+    is_html = bool(re.search(r'<[^>]+>', text))
+
+    # normalise data_map values to strings
+    norm_map = {}
+    for k, v in (data_map or {}).items():
+        try:
+            norm_map[str(k)] = '' if v is None else str(v)
+        except Exception:
+            norm_map[str(k)] = ''
+
+    # helper to resolve synonyms
+    def resolve_key(key: str) -> str:
+        k = key.lower()
+        # applicant name
+        if k in ('applicant_name', 'applicant', 'name', '氏名'):
+            return norm_map.get('applicant_name') or norm_map.get('name') or norm_map.get('氏名') or ''
+        # employer / poster company / 掲載企業名 / 企業名 / 会社名 (publishing company)
+        if k in ('employer_name', 'employer', 'poster_company', '掲載企業名', '企業名', '会社名'):
+            return (
+                norm_map.get('employer_name')
+                or norm_map.get('employer')
+                or norm_map.get('poster_company')
+                or norm_map.get('企業名')
+                or norm_map.get('掲載企業名')
+                or norm_map.get('会社名')
+                or ''
+            )
+        # job title / position / 求人タイトル / 職種
+        if k in ('position', 'job_title', 'jobtitle', '求人タイトル', '職種'):
+            return (
+                norm_map.get('job_title')
+                or norm_map.get('position')
+                or norm_map.get('求人タイトル')
+                or norm_map.get('職種')
+                or ''
+            )
+        # company / account name / アカウント名 (account/recruiter name, distinct from 会社名)
+        if k in ('company', 'account_name', 'accountname', 'アカウント名'):
+            return norm_map.get('company') or norm_map.get('account_name') or norm_map.get('accountname') or norm_map.get('アカウント名') or ''
+        # generic fallback
+        return norm_map.get(key) or norm_map.get(key.lower()) or ''
+
+    # Support ASCII word chars plus Hiragana/Katakana/Kanji inside token keys
+    token_re = re.compile(r"{{\s*([a-zA-Z0-9_\u3040-\u30ff\u4e00-\u9fff]+)\s*}}")
+
+    def _repl(m):
+        key = m.group(1)
+        val = resolve_key(key)
+        if is_html and _html:
+            return _html.escape(val)
+        return val
+
+    try:
+        return token_re.sub(_repl, text)
+    except Exception:
+        return text
+
+
 def _match_segment_conditions(applicant_detail, segment_conditions):
     """
     Check if applicant matches segment conditions.
@@ -812,7 +891,145 @@ def send_auto_reply_if_configured(uid, mail_cfg, is_target, detail, jb=None):
         # Treat dry-run as not actually attempted so callers don't treat it as a real send
         return (False, False, {'note': 'dry_run'})
 
-    ok_mail, info_mail = send_mail_once(sender, sender_pass, to_email, subj or '', body or '')
+    # Apply template tokens using detail map if available (detail keys expected by caller)
+    try:
+        data_for_mail = {}
+        # Debug: print detail input to check if employer_name is present
+        if debug:
+            print(f"[DEBUG_MAIL] detail keys: {list(detail.keys()) if isinstance(detail, dict) else 'not dict'}")
+            if isinstance(detail, dict) and 'employer_name' in detail:
+                print(f"[DEBUG_MAIL] detail.employer_name: '{detail.get('employer_name')}'")
+        
+        # Build a rich data map with multiple synonym keys (English + Japanese)
+        if isinstance(detail, dict):
+            # Applicant name
+            name_val = detail.get('name') or detail.get('\u6c0f\u540d') or detail.get('氏名')
+            data_for_mail['applicant_name'] = name_val
+            data_for_mail['name'] = name_val
+            data_for_mail['氏名'] = name_val
+
+            # Job title / position (several possible source keys)
+            jt = (
+                detail.get('job_title')
+                or detail.get('\u6c42\u4eba\u30bf\u30a4\u30c8\u30eb')
+                or detail.get('jobTitle')
+                or detail.get('求人タイトル')
+                or detail.get('職種')
+            )
+            data_for_mail['job_title'] = jt
+            data_for_mail['position'] = jt
+            data_for_mail['jobtitle'] = jt
+            data_for_mail['求人タイトル'] = jt
+            data_for_mail['職種'] = jt
+
+            # Company / account name (several possible source keys)
+            comp = (
+                detail.get('account_name')
+                or detail.get('\u30a2\u30ab\u30a6\u30f3\u30c8\u540d')
+                or detail.get('company')
+                or detail.get('会社名')
+                or detail.get('アカウント名')
+            )
+            data_for_mail['company'] = comp
+            data_for_mail['account_name'] = comp
+            data_for_mail['accountname'] = comp
+            data_for_mail['会社名'] = comp
+            data_for_mail['アカウント名'] = comp
+            # Employer / poster company (distinct from account_name)
+            emp = (
+                detail.get('employer_name')
+                or detail.get('\u6392\u8868\u4f1a\u793e\u540d')
+                or detail.get('掲載企業名')
+                or detail.get('企業名')
+                or detail.get('poster_company')
+            )
+            data_for_mail['employer_name'] = emp
+            data_for_mail['employer'] = emp
+            data_for_mail['掲載企業名'] = emp
+            data_for_mail['企業名'] = emp
+            data_for_mail['会社名'] = emp  # 追加：会社名トークン用
+    except Exception:
+        data_for_mail = {}
+
+    try:
+        # Debug print of the data map and raw templates to help diagnose missing fields
+        if debug:
+            try:
+                printable = {}
+                for k, v in (data_for_mail or {}).items():
+                    try:
+                        printable[k] = (v[:120] + '...') if isinstance(v, str) and len(v) > 120 else v
+                    except Exception:
+                        printable[k] = v
+                print('[DEBUG_MAIL] data_for_mail:', printable)
+                print('[DEBUG_MAIL] raw subj:', (subj or '')[:200])
+                print('[DEBUG_MAIL] raw body :', re.sub(r'\s+', ' ', (body or ''))[:300])
+            except Exception:
+                pass
+        subj_to_send = apply_template_tokens(subj or '', data_for_mail)
+        body_to_send = apply_template_tokens(body or '', data_for_mail)
+
+        # Diagnostic: if template contains tokens whose values are empty, log details
+        try:
+            token_re = re.compile(r"{{\s*([a-zA-Z0-9_\u3040-\u30ff\u4e00-\u9fff]+)\s*}}")
+            raw_tokens = set(token_re.findall((subj or '') + ' ' + (body or '')))
+            missing = []
+            if raw_tokens:
+                for tk in raw_tokens:
+                    k = tk.lower()
+                    val = ''
+                    # resolve similarly to apply_template_tokens
+                    if k in ('applicant_name', 'applicant', 'name', '氏名'):
+                        val = (data_for_mail.get('applicant_name') or data_for_mail.get('name') or data_for_mail.get('氏名') or '')
+                    elif k in ('position', 'job_title', 'jobtitle', '求人タイトル', '職種'):
+                        val = (data_for_mail.get('job_title') or data_for_mail.get('position') or data_for_mail.get('求人タイトル') or data_for_mail.get('職種') or '')
+                    elif k in ('employer_name', 'employer', 'poster_company', '掲載企業名', '企業名', '会社名'):
+                        val = (data_for_mail.get('employer_name') or data_for_mail.get('employer') or data_for_mail.get('poster_company') or data_for_mail.get('企業名') or data_for_mail.get('掲載企業名') or data_for_mail.get('会社名') or '')
+                    elif k in ('company', 'account_name', 'accountname', 'アカウント名'):
+                        val = (data_for_mail.get('company') or data_for_mail.get('account_name') or data_for_mail.get('accountname') or data_for_mail.get('アカウント名') or '')
+                    else:
+                        val = data_for_mail.get(tk) or data_for_mail.get(k) or ''
+                    if not val:
+                        missing.append(tk)
+            if missing:
+                try:
+                    import datetime
+                    ts = datetime.datetime.utcnow().isoformat() + 'Z'
+                    logline = {
+                        'ts': ts,
+                        'uid': uid,
+                        'to': to_email,
+                        'missing_tokens': missing,
+                        'raw_subj': (subj or '')[:300],
+                        'raw_body_excerpt': re.sub(r'\s+', ' ', (body or ''))[:400],
+                    }
+                    # Trim data_for_mail for logging
+                    printable = {}
+                    for k, v in (data_for_mail or {}).items():
+                        try:
+                            s = v if v is not None else ''
+                            s = str(s)
+                            printable[k] = s[:200] + '...' if len(s) > 200 else s
+                        except Exception:
+                            printable[k] = ''
+                    logline['data_for_mail'] = printable
+                    try:
+                        os.makedirs(os.path.join(os.getcwd(), 'logs'), exist_ok=True)
+                        with open(os.path.join(os.getcwd(), 'logs', 'watcher.log'), 'a', encoding='utf-8') as lf:
+                            lf.write(str(logline) + '\n')
+                    except Exception:
+                        pass
+                    if debug:
+                        print('[DEBUG_MAIL] missing token values detected:', logline)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    except Exception:
+        subj_to_send = subj or ''
+        body_to_send = body or ''
+
+    ok_mail, info_mail = send_mail_once(sender, sender_pass, to_email, subj_to_send, body_to_send)
     if ok_mail:
         print(f"メール送信成功: to={to_email}")
         try:
@@ -939,6 +1156,42 @@ def write_sms_history(uid: str, doc: dict) -> bool:
         return False
 
 
+def write_mail_history(uid: str, doc: dict) -> bool:
+    """Write a minimal mail_history document under accounts/{uid}/mail_history using service account.
+
+    Returns True on success.
+    """
+    sa_file = _find_service_account_file()
+    if not sa_file:
+        print('service-account file not found; cannot write mail_history')
+        return False
+    try:
+        import json
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        with open(sa_file, 'r', encoding='utf-8') as f:
+            sa = json.load(f)
+        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+        creds.refresh(Request())
+        token = creds.token
+        project = sa.get('project_id')
+        if not project:
+            print('service account missing project_id')
+            return False
+        url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/mail_history'
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+        body = {'fields': _make_fields_for_firestore(doc)}
+        r = requests.post(url, headers=headers, json=body, timeout=15)
+        if r.status_code in (200, 201):
+            return True
+        else:
+            print('Failed to write mail_history', r.status_code, r.text[:1000])
+            return False
+    except Exception as e:
+        print('Exception writing mail_history:', e)
+        return False
+
+
 def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll_seconds=30):
     print('IMAPサーバーに接続しています...')
     conn = imaplib.IMAP4_SSL(imap_host)
@@ -1038,6 +1291,17 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                         def get_jobbox_accounts(uid):
                             if not uid:
                                 return []
+                            # simple per-uid cache to avoid repeated expensive Firestore list calls
+                            cache = getattr(get_jobbox_accounts, '_cache', None)
+                            if cache is None:
+                                get_jobbox_accounts._cache = {}
+                                cache = get_jobbox_accounts._cache
+                            CACHE_TTL = 300  # seconds
+                            if uid in cache:
+                                ts, accounts = cache[uid]
+                                if time.time() - ts < CACHE_TTL:
+                                    print(f"[DEBUG_JOBBOX] returning cached jobbox_accounts for uid={uid} (age={int(time.time()-ts)}s)")
+                                    return accounts
                             sa_candidates = [
                                 os.path.join(os.getcwd(), 'service-account'),
                                 os.path.join(os.path.dirname(__file__), '..', 'service-account'),
@@ -1054,11 +1318,14 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                 import json
                                 from google.oauth2 import service_account
                                 from google.auth.transport.requests import Request
+                                t0 = time.time()
                                 with open(sa_file, 'r', encoding='utf-8') as f:
                                     sa = json.load(f)
                                 creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
                                 creds.refresh(Request())
                                 token = creds.token
+                                t1 = time.time()
+                                print(f"[DEBUG_JOBBOX] service-account load+token refresh took {int((t1-t0)*1000)}ms")
                             except Exception:
                                 return []
                             project = sa.get('project_id')
@@ -1071,12 +1338,18 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                             accounts = []
                             page_token = None
                             try:
+                                t_start = time.time()
+                                network_time = 0.0
                                 while True:
                                     params = {'pageSize': 100}
                                     if page_token:
                                         params['pageToken'] = page_token
+                                    tn0 = time.time()
                                     r = requests.get(base_url, headers=headers, params=params, timeout=10)
+                                    tn1 = time.time()
+                                    network_time += (tn1 - tn0)
                                     if r.status_code != 200:
+                                        print(f"[DEBUG_JOBBOX] requests.get returned {r.status_code}")
                                         break
                                     data = r.json()
                                     docs = data.get('documents', [])
@@ -1091,8 +1364,16 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                     page_token = data.get('nextPageToken')
                                     if not page_token:
                                         break
+                                t_end = time.time()
+                                print(f"[DEBUG_JOBBOX] fetched {len(accounts)} accounts in {int((t_end-t_start)*1000)}ms (network {int(network_time*1000)}ms)")
+                                # store in cache
+                                try:
+                                    cache[uid] = (time.time(), accounts)
+                                except Exception:
+                                    pass
                                 return accounts
-                            except Exception:
+                            except Exception as e:
+                                print(f"[DEBUG_JOBBOX] exception while fetching jobbox_accounts: {e}")
                                 return accounts
 
                         remote_accounts = get_jobbox_accounts(uid)
@@ -1558,7 +1839,21 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         except Exception as e:
                                                             print('Exception when writing sms_history for invalid phone:', e)
                                                 else:
-                                                    success, info = send_sms_router(norm, tpl)
+                                                    # Prepare data map for token substitution in SMS
+                                                    try:
+                                                        sms_data = {
+                                                            'applicant_name': detail.get('name'),
+                                                            'job_title': detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle'),
+                                                            'company': detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
+                                                        }
+                                                    except Exception:
+                                                        sms_data = {}
+                                                    try:
+                                                        tpl_to_send = apply_template_tokens(tpl, sms_data)
+                                                    except Exception:
+                                                        tpl_to_send = tpl
+
+                                                    success, info = send_sms_router(norm, tpl_to_send)
                                                     # If not dry-run, record history for both success and failure
                                                     if not dry_run_env and uid:
                                                         try:
@@ -1738,19 +2033,121 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             mail_attempted = True
                                                             subject = mail_action['subject']
                                                             body = mail_action['body']
-                                                            
+
+                                                            # Apply template tokens before sending (subject + body)
+                                                            try:
+                                                                # Build a data map for template replacement with multiple fallbacks.
+                                                                applicant_name = ''
+                                                                job_title_val = ''
+                                                                company_val = ''
+                                                                employer_name_val = ''  # 追加：勤務先名
+                                                                if isinstance(detail, dict):
+                                                                    applicant_name = detail.get('name') or detail.get('氏名') or detail.get('\u6c0f\u540d') or ''
+                                                                    job_title_val = detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle') or ''
+                                                                    company_val = detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or ''
+                                                                    employer_name_val = detail.get('employer_name') or detail.get('掲載企業名') or detail.get('企業名') or ''  # 追加
+
+                                                                # fallback to info.title returned by find_and_check_applicant
+                                                                try:
+                                                                    if not job_title_val and 'info' in locals() and isinstance(info, dict):
+                                                                        job_title_val = info.get('title') or job_title_val
+                                                                except Exception:
+                                                                    pass
+
+                                                                # fallback to parsed values (from the initial Jobbox notice email)
+                                                                try:
+                                                                    if not job_title_val and 'parsed' in locals() and isinstance(parsed, dict):
+                                                                        job_title_val = parsed.get('job_title') or job_title_val
+                                                                except Exception:
+                                                                    pass
+                                                                try:
+                                                                    if not company_val and 'parsed' in locals() and isinstance(parsed, dict):
+                                                                        company_val = parsed.get('account_name') or company_val
+                                                                except Exception:
+                                                                    pass
+                                                                # fallback for employer_name from parsed values
+                                                                try:
+                                                                    if not employer_name_val and 'parsed' in locals() and isinstance(parsed, dict):
+                                                                        employer_name_val = parsed.get('employer_name') or employer_name_val
+                                                                except Exception:
+                                                                    pass
+
+                                                                # fallback to jb.account if available
+                                                                try:
+                                                                    if not company_val and 'jb' in locals() and getattr(jb, 'account', None):
+                                                                        company_val = (jb.account.get('account_name') if isinstance(jb.account, dict) else None) or company_val
+                                                                except Exception:
+                                                                    pass
+
+                                                                data_for_mail = {
+                                                                    'applicant_name': applicant_name,
+                                                                    'name': applicant_name,
+                                                                    '氏名': applicant_name,
+                                                                    'job_title': job_title_val,
+                                                                    'position': job_title_val,
+                                                                    '求人タイトル': job_title_val,
+                                                                    '職種': job_title_val,
+                                                                    'company': company_val,
+                                                                    'account_name': company_val,
+                                                                    'アカウント名': company_val,
+                                                                    'employer_name': employer_name_val,
+                                                                    'employer': employer_name_val,
+                                                                    '会社名': employer_name_val,  # 重要：会社名トークン用
+                                                                    '掲載企業名': employer_name_val,
+                                                                    '企業名': employer_name_val,
+                                                                }
+                                                            except Exception:
+                                                                data_for_mail = {}
+                                                            try:
+                                                                subject_to_send = apply_template_tokens(subject or '', data_for_mail)
+                                                                body_to_send = apply_template_tokens(body or '', data_for_mail)
+                                                            except Exception:
+                                                                subject_to_send = subject or ''
+                                                                body_to_send = body or ''
+
+                                                            # Debug: show data_for_mail and substituted values
+                                                            debug_mail = os.environ.get('DEBUG_MAIL', 'false').lower() in ('1','true','yes')
+                                                            if debug_mail:
+                                                                try:
+                                                                    print('[DEBUG_MAIL] data_for_mail keys:', list(data_for_mail.keys()))
+                                                                    print('[DEBUG_MAIL] employer_name:', data_for_mail.get('employer_name', 'None'))
+                                                                    print('[DEBUG_MAIL] 会社名:', data_for_mail.get('会社名', 'None'))
+                                                                    print('[DEBUG_MAIL] substituted subject:', (subject_to_send or '')[:120])
+                                                                    print('[DEBUG_MAIL] substituted body   :', re.sub(r'\s+', ' ', (body_to_send or ''))[:180])
+                                                                except Exception:
+                                                                    pass
+
                                                             # Check if DRY_RUN_MAIL is enabled
                                                             mail_dry = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
                                                             if mail_dry:
-                                                                print(f'[DRY_RUN_MAIL] would send mail from={sender} to={to_email} subj={subject}')
+                                                                print(f'[DRY_RUN_MAIL] would send mail from={sender} to={to_email} subj={subject_to_send}')
                                                                 mail_ok, mail_info = True, {'note': 'dry_run'}
                                                             else:
-                                                                # Send HTML email
-                                                                mail_ok, mail_info = _send_html_mail(sender, sender_pass, to_email, subject, body)
+                                                                # Send HTML email (body may be HTML; apply_template_tokens already HTML-escapes values if needed)
+                                                                mail_ok, mail_info = _send_html_mail(sender, sender_pass, to_email, subject_to_send, body_to_send)
                                                             if mail_ok:
-                                                                print(f'メール送信成功: {to_email} (件名: {subject})')
+                                                                print(f'メール送信成功: {to_email} (件名: {subject_to_send})')
                                                             else:
                                                                 print(f'メール送信失敗: {to_email} - {mail_info}')
+
+                                                            # Write mail_history for this attempt (unless dry-run)
+                                                            mail_dry_env = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
+                                                            if not mail_dry_env and uid:
+                                                                try:
+                                                                    rec = {
+                                                                        'name': detail.get('name'),
+                                                                        'email': detail.get('email'),
+                                                                        'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                                        'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                                        'status': '送信済' if mail_ok else '送信失敗',
+                                                                        'response': mail_info if isinstance(mail_info, dict) else {'note': str(mail_info)},
+                                                                        'sentAt': int(time.time())
+                                                                    }
+                                                                    ok_write_mail = write_mail_history(str(uid), rec)
+                                                                    if not ok_write_mail:
+                                                                        print('Failed to write mail_history')
+                                                                except Exception as e:
+                                                                    print('Exception when writing mail_history:', e)
                                                         else:
                                                             print('メール設定が不完全です（送信者またはパスワードが不足）')
                                                             mail_info = {'error': 'incomplete mail settings'}
@@ -1801,7 +2198,30 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                     mail_cfg = get_target_settings(uid)
                                                 except Exception:
                                                     mail_cfg = {}
-                                                send_auto_reply_if_configured(uid, mail_cfg, False, detail, jb)
+                                                # Call auto-reply helper and capture result so we can write mail_history
+                                                try:
+                                                    mail_sent_ok, mail_sent_flag, mail_sent_info = send_auto_reply_if_configured(uid, mail_cfg, False, detail, jb)
+                                                except Exception as e:
+                                                    mail_sent_ok, mail_sent_flag, mail_sent_info = (False, False, {'error': str(e)})
+
+                                                # Write mail_history if not dry-run
+                                                try:
+                                                    mail_dry_env2 = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
+                                                    if not mail_dry_env2 and uid:
+                                                        rec = {
+                                                            'name': detail.get('name'),
+                                                            'email': detail.get('email'),
+                                                            'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                            'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                            'status': '送信済' if (mail_sent_ok and mail_sent_flag) else ('送信失敗' if mail_sent_ok and not mail_sent_flag else '送信抑制'),
+                                                            'response': mail_sent_info if isinstance(mail_sent_info, dict) else {'note': str(mail_sent_info)},
+                                                            'sentAt': int(time.time())
+                                                        }
+                                                        ok_write_mail2 = write_mail_history(str(uid), rec)
+                                                        if not ok_write_mail2:
+                                                            print('Failed to write mail_history (non-target)')
+                                                except Exception as e:
+                                                    print('Exception when writing mail_history (non-target):', e)
                                             except Exception as e:
                                                 print('メール送信処理中に例外が発生しました(対象外):', e)
                                             if not dry_run_env and uid:

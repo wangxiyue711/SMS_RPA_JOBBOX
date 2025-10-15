@@ -5,29 +5,63 @@ import { getClientAuth } from "../../lib/firebaseClient";
 import {
   getFirestore,
   doc,
-  getDoc,
-  setDoc,
   collection,
+  query,
+  orderBy,
+  getDocs,
   addDoc,
   updateDoc,
-  deleteDoc,
   serverTimestamp,
-  query,
-  getDocs,
-  orderBy,
+  deleteDoc,
+  getDoc,
 } from "firebase/firestore";
 
-// RichTextEditor 提取到文件顶部，避免在父组件重渲染时重新创建导致光标丢失。
+const serializePlaceholdersFromHtml = (html: string) => {
+  if (!html) return "";
+  if (typeof document === "undefined") return html;
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  const spans = div.querySelectorAll("span[data-placeholder]");
+  spans.forEach((s) => {
+    const key = s.getAttribute("data-placeholder") || "";
+    const token = `{{${key}}}`;
+    const tn = document.createTextNode(token);
+    s.parentNode?.replaceChild(tn, s);
+  });
+  return div.innerHTML;
+};
+
+const tokensToHtml = (text: string) => {
+  if (!text) return "";
+  const map: Record<string, string> = {
+    applicant_name: "{{氏名}}",
+    name: "{{氏名}}",
+    job_title: "{{職種}}",
+    position: "{{職種}}",
+    employer_name: "{{会社名}}",
+    employer: "{{会社名}}",
+  };
+  return text.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (m, key) => {
+    const label = map[key] || `{{${key}}}`;
+    return `<span data-placeholder="${key}" contenteditable="false" style="background:#fff3cd;border:1px solid #ffeeba;padding:2px 6px;border-radius:4px;margin:0 2px;display:inline-block;user-select:none">${label}</span>`;
+  });
+};
+// RichTextEditor: 简洁、稳定的实现，支持通过 body 工具栏在 subject 或 body 中插入占位符
 type RichTextEditorProps = {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
+  // Callback used to request insertion into subject. Should return true if handled.
+  onInsertIntoSubject?: (token: string) => boolean;
+  subjectRef?: React.RefObject<HTMLInputElement>;
 };
 
 const RichTextEditor: React.FC<RichTextEditorProps> = ({
   value,
   onChange,
   placeholder,
+  onInsertIntoSubject,
+  subjectRef,
 }) => {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const isComposingRef = useRef(false);
@@ -35,210 +69,257 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   const [linkUrl, setLinkUrl] = useState("");
   const savedRangeRef = useRef<Range | null>(null);
 
-  // 保存当前选区
   const saveSelection = () => {
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) {
-      savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-    }
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0)
+      savedRangeRef.current = sel.getRangeAt(0).cloneRange();
   };
 
-  // 恢复选区
   const restoreSelection = () => {
     if (savedRangeRef.current) {
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(savedRangeRef.current);
-      // 确保编辑器获得焦点
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(savedRangeRef.current);
       editorRef.current?.focus();
     }
   };
 
+  const insertPlaceholderIntoSubject = (token: string) => {
+    // If parent provided a handler via props, call it
+    try {
+      if (typeof onInsertIntoSubject === "function") {
+        try {
+          const handled = onInsertIntoSubject(token);
+          if (handled) return true;
+        } catch (e) {
+          // continue to fallback
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Fallback: try to modify DOM directly (not preferred)
+    if (!subjectRef || !subjectRef.current) return false;
+    const ref = subjectRef.current as HTMLInputElement;
+    try {
+      const start = (ref.selectionStart ?? ref.value.length) as number;
+      const end = (ref.selectionEnd ?? start) as number;
+      const v = ref.value || "";
+      const nv = v.slice(0, start) + token + v.slice(end);
+      // Direct DOM update; parent state may be out-of-sync
+      ref.value = nv;
+      const pos = start + token.length;
+      ref.setSelectionRange(pos, pos);
+      ref.focus();
+      const ev = new Event("input", { bubbles: true });
+      ref.dispatchEvent(ev);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  const insertPlaceholderIntoEditor = (label: string, dataKey: string) => {
+    const span = document.createElement("span");
+    span.setAttribute("data-placeholder", dataKey);
+    span.setAttribute("contenteditable", "false");
+    span.style.background = "#fff3cd";
+    span.style.border = "1px solid #ffeeba";
+    span.style.padding = "2px 6px";
+    span.style.borderRadius = "4px";
+    span.style.margin = "0 2px";
+    span.style.fontSize = "0.95em";
+    span.style.display = "inline-block";
+    span.style.userSelect = "none";
+    span.textContent = label;
+
+    try {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(span);
+        const newRange = document.createRange();
+        newRange.setStartAfter(span);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      } else {
+        editorRef.current?.appendChild(span);
+      }
+    } catch (e) {
+      editorRef.current?.appendChild(span);
+    }
+    if (editorRef.current) onChange(editorRef.current.innerHTML);
+  };
+
   const execCommand = (command: string, val: any = null) => {
-    if (command === "italic") {
-      const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        if (range.collapsed) return;
+    if (command === "createLink") {
+      document.execCommand("createLink", false, val);
+      if (editorRef.current) onChange(editorRef.current.innerHTML);
+      return;
+    }
 
-        // helper: find nearest ancestor element that has our custom italic marker
-        const getAncestorWithAttr = (node: Node | null) => {
-          let el: HTMLElement | null = null;
-          if (!node) return null;
-          el =
-            node.nodeType === 3
-              ? (node.parentElement as HTMLElement)
-              : (node as HTMLElement);
-          while (el) {
-            if (el.getAttribute && el.getAttribute("data-custom-italic"))
-              return el;
-            el = el.parentElement;
-          }
-          return null;
-        };
-
-        const startAncestor = getAncestorWithAttr(range.startContainer);
-        const endAncestor = getAncestorWithAttr(range.endContainer);
-
-        // If the whole selection is inside the same custom-italic ancestor -> toggle off
+    if (command === "insertPlaceholder") {
+      const key = String(val || "").toLowerCase();
+      const labelMap: Record<string, string> = {
+        name: "{{氏名}}",
+        position: "{{職種}}",
+        employer: "{{会社名}}",
+      };
+      const dataMap: Record<string, string> = {
+        name: "applicant_name",
+        position: "job_title",
+        employer: "employer_name",
+      };
+      const label = labelMap[key] || `{{${key}}}`;
+      const dataKey = dataMap[key] || key;
+      // Decide target explicitly to avoid inserting into unrelated DOM nodes.
+      try {
+        // 1) Subject focused -> insert into subject
         if (
-          startAncestor &&
-          startAncestor === endAncestor &&
-          startAncestor.contains(range.startContainer) &&
-          startAncestor.contains(range.endContainer)
+          subjectRef &&
+          subjectRef.current &&
+          document.activeElement === subjectRef.current
         ) {
-          // If the span has other meaningful styles (e.g. underline), don't unwrap completely.
-          // Instead, remove only the italic-related styles and attribute so underline remains.
-          const spanEl = startAncestor as HTMLElement;
-          const hasOtherStyle = (() => {
-            // consider textDecoration (underline), color, background, etc. as other styles
-            const s = spanEl.style;
-            if (
-              s.textDecoration &&
-              s.textDecoration.indexOf("underline") !== -1
-            )
-              return true;
-            if (
-              s.textDecorationLine &&
-              s.textDecorationLine.indexOf("underline") !== -1
-            )
-              return true;
-            // check commonly used visible styles besides fontStyle/transform
-            if (s.color) return true;
-            if (s.backgroundColor) return true;
-            if (s.fontWeight) return true;
-            return false;
-          })();
+          const tokenMap: Record<string, string> = {
+            name: "{{applicant_name}}",
+            position: "{{job_title}}",
+            employer: "{{employer_name}}",
+          };
+          const token = tokenMap[dataKey] || `{{${dataKey}}}`;
+          const ok = insertPlaceholderIntoSubject(token);
+          if (ok) return;
+        }
 
-          if (hasOtherStyle) {
-            // remove italic-specific styles but keep element
-            spanEl.style.fontStyle = "";
-            spanEl.style.transform = "";
-            spanEl.removeAttribute("data-custom-italic");
-          } else {
-            // fully unwrap
-            const parent = spanEl.parentNode as Node;
-            while (spanEl.firstChild)
-              parent.insertBefore(spanEl.firstChild, spanEl);
-            parent.removeChild(spanEl);
-          }
-
-          selection.removeAllRanges();
-          if (editorRef.current) onChange(editorRef.current.innerHTML);
+        // 2) If selection is inside editor, insert at selection
+        const sel = window.getSelection();
+        const anchor = sel && sel.anchorNode ? sel.anchorNode : null;
+        if (anchor && editorRef.current && editorRef.current.contains(anchor)) {
+          insertPlaceholderIntoEditor(label, dataKey);
           return;
         }
 
-        // Otherwise: remove any existing custom-italic spans that intersect selection to avoid nesting,
-        // then wrap the selection once with a single custom span.
-        const commonAncestor =
-          range.commonAncestorContainer.nodeType === 3
-            ? (range.commonAncestorContainer as Node).parentElement
-            : (range.commonAncestorContainer as Element);
-        if (commonAncestor) {
-          const existing = (commonAncestor as Element).querySelectorAll(
-            "span[data-custom-italic]"
-          );
-          existing.forEach((s) => {
-            try {
-              if (range.intersectsNode(s)) {
-                const p = s.parentNode as Node;
-                while (s.firstChild) p.insertBefore(s.firstChild, s);
-                p.removeChild(s);
-              }
-            } catch (e) {
-              // ignore
-            }
-          });
-        }
-
-        // wrap selection with a single span
-        const wrapSpan = () => {
-          const span = document.createElement("span");
-          span.setAttribute("data-custom-italic", "1");
-          span.style.fontStyle = "italic";
-          span.style.transform = "skew(-10deg)";
-          span.style.display = "inline-block";
-
-          // If selection is inside an element that visually has underline, copy that to our span
+        // 3) Otherwise, focus editor and append at end
+        if (editorRef.current) {
+          editorRef.current.focus();
+          // ensure selection is at end
           try {
-            const startEl =
-              range.startContainer.nodeType === 3
-                ? (range.startContainer as Text).parentElement
-                : (range.startContainer as Element);
-            let cur: HTMLElement | null = startEl as HTMLElement | null;
-            let foundUnderline = false;
-            while (cur && cur !== editorRef.current) {
-              const cs = window.getComputedStyle(cur as Element);
-              const td = cs.textDecorationLine || cs.textDecoration || "";
-              if (
-                td.indexOf("underline") !== -1 ||
-                (cur.tagName && cur.tagName.toLowerCase() === "u")
-              ) {
-                foundUnderline = true;
-                break;
-              }
-              cur = cur.parentElement;
-            }
-            if (foundUnderline) {
-              span.style.textDecoration = "underline";
-            }
-          } catch (e) {
-            // ignore
-          }
-
-          return span;
-        };
-
-        try {
-          const span = wrapSpan();
-          range.surroundContents(span);
-        } catch (e) {
-          // fallback for complex ranges
-          const span = wrapSpan();
-          const frag = range.extractContents();
-          span.appendChild(frag);
-          range.insertNode(span);
+            const range = document.createRange();
+            range.selectNodeContents(editorRef.current);
+            range.collapse(false);
+            const s = window.getSelection();
+            s?.removeAllRanges();
+            s?.addRange(range);
+          } catch (e) {}
+          insertPlaceholderIntoEditor(label, dataKey);
+          return;
         }
-        selection.removeAllRanges();
+      } catch (e) {
+        // final fallback -> insert into editor DOM if available
       }
-    } else {
-      document.execCommand(command, false, val);
+
+      insertPlaceholderIntoEditor(label, dataKey);
+      return;
     }
-    if (editorRef.current) {
-      onChange(editorRef.current.innerHTML);
-    }
+
+    // default exec for bold/italic/underline
+    document.execCommand(command, false, val);
+    if (editorRef.current) onChange(editorRef.current.innerHTML);
+  };
+
+  // small link dialog handler UI
+  const renderLinkDialog = () => {
+    if (!showLinkDialog) return null;
+    return (
+      <div
+        style={{ padding: 8, borderTop: "1px solid #eee", background: "#fff" }}
+      >
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            autoFocus
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            placeholder="https://..."
+            style={{
+              flex: 1,
+              padding: 8,
+              border: "1px solid #ddd",
+              borderRadius: 4,
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (linkUrl.trim()) {
+                  try {
+                    restoreSelection();
+                  } catch {}
+                  execCommand("createLink", linkUrl.trim());
+                }
+                setLinkUrl("");
+                setShowLinkDialog(false);
+              } else if (e.key === "Escape") {
+                setLinkUrl("");
+                setShowLinkDialog(false);
+              }
+            }}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => {
+                setLinkUrl("");
+                setShowLinkDialog(false);
+              }}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 4,
+                border: "1px solid #ddd",
+                background: "#f8f9fa",
+              }}
+            >
+              キャンセル
+            </button>
+            <button
+              onClick={() => {
+                if (linkUrl.trim()) {
+                  try {
+                    restoreSelection();
+                  } catch {}
+                  execCommand("createLink", linkUrl.trim());
+                }
+                setLinkUrl("");
+                setShowLinkDialog(false);
+              }}
+              disabled={!linkUrl.trim()}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 4,
+                border: "none",
+                background: linkUrl.trim() ? "#333" : "#ccc",
+                color: "#fff",
+              }}
+            >
+              挿入
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const handleInput = () => {
-    if (editorRef.current && !isComposingRef.current) {
+    if (editorRef.current && !isComposingRef.current)
       onChange(editorRef.current.innerHTML);
-    }
   };
 
-  const handleCompositionStart = () => {
-    isComposingRef.current = true;
-  };
-
-  const handleCompositionEnd = () => {
-    isComposingRef.current = false;
-    if (editorRef.current) {
-      onChange(editorRef.current.innerHTML);
-    }
-  };
-
-  // 当外部 value 变化且与 DOM 不同时，更新 DOM 内容并尽量保持光标位置
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
-    // 如果编辑器正在被输入法组成，或当前有焦点，跳过覆盖 DOM 内容，
-    // 以避免在输入过程中重置导致光标消失
     const isFocused = document.activeElement === el;
     if (isComposingRef.current || isFocused) return;
-
     const domHtml = el.innerHTML || "";
     const newHtml = value || "";
     if (domHtml === newHtml) return;
-
     el.innerHTML = newHtml;
   }, [value]);
 
@@ -255,7 +336,11 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       >
         <button
           type="button"
-          onClick={() => execCommand("bold")}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            execCommand("bold");
+          }}
+          title="太字"
           style={{
             border: "none",
             background: "transparent",
@@ -265,13 +350,16 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
             fontSize: 14,
             fontWeight: "bold",
           }}
-          title="太字"
         >
           B
         </button>
         <button
           type="button"
-          onClick={() => execCommand("italic")}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            execCommand("italic");
+          }}
+          title="斜体"
           style={{
             border: "none",
             background: "transparent",
@@ -281,13 +369,16 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
             fontSize: 14,
             fontStyle: "italic",
           }}
-          title="斜体"
         >
           I
         </button>
         <button
           type="button"
-          onClick={() => execCommand("underline")}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            execCommand("underline");
+          }}
+          title="下線"
           style={{
             border: "none",
             background: "transparent",
@@ -297,16 +388,17 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
             fontSize: 14,
             textDecoration: "underline",
           }}
-          title="下線"
         >
           U
         </button>
         <button
           type="button"
-          onClick={() => {
+          onMouseDown={(e) => {
+            e.preventDefault();
             saveSelection();
             setShowLinkDialog(true);
           }}
+          title="リンク"
           style={{
             border: "none",
             background: "transparent",
@@ -315,18 +407,67 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
             borderRadius: 2,
             fontSize: 14,
           }}
-          title="リンク"
         >
           🔗
         </button>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              execCommand("insertPlaceholder", "name");
+            }}
+            title="氏名を挿入"
+            style={{
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+            }}
+          >
+            氏名
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              execCommand("insertPlaceholder", "position");
+            }}
+            title="職種を挿入"
+            style={{
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+            }}
+          >
+            職種
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              execCommand("insertPlaceholder", "employer");
+            }}
+            title="会社名を挿入"
+            style={{
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+            }}
+          >
+            会社名
+          </button>
+        </div>
       </div>
 
       <div
         ref={editorRef}
         contentEditable
         onInput={handleInput}
-        onCompositionStart={handleCompositionStart}
-        onCompositionEnd={handleCompositionEnd}
+        onCompositionStart={() => (isComposingRef.current = true)}
+        onCompositionEnd={() => {
+          isComposingRef.current = false;
+          if (editorRef.current) onChange(editorRef.current.innerHTML);
+        }}
         style={{
           minHeight: 120,
           padding: "12px",
@@ -345,126 +486,11 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
           color: #999;
           font-style: italic;
         }
-        div[contenteditable] span[style*="italic"] {
-          font-style: italic;
-          transform: skew(-10deg);
-          display: inline-block;
-        }
-        div[contenteditable] em,
-        div[contenteditable] i {
-          font-style: italic;
-          transform: skew(-10deg);
-          display: inline-block;
-        }
       `}</style>
-
-      {/* リンク挿入ダイアログ */}
-      {showLinkDialog && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-        >
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: 8,
-              padding: 24,
-              maxWidth: 400,
-              width: "90%",
-              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
-            }}
-          >
-            <h3 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 600 }}>
-              リンクを挿入
-            </h3>
-            <input
-              type="url"
-              value={linkUrl}
-              onChange={(e) => setLinkUrl(e.target.value)}
-              placeholder="https://example.com"
-              style={{
-                width: "100%",
-                padding: "8px 12px",
-                border: "1px solid #ddd",
-                borderRadius: 4,
-                fontSize: 14,
-                boxSizing: "border-box",
-                marginBottom: 16,
-              }}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  if (linkUrl.trim()) {
-                    restoreSelection();
-                    execCommand("createLink", linkUrl.trim());
-                  }
-                  setLinkUrl("");
-                  setShowLinkDialog(false);
-                } else if (e.key === "Escape") {
-                  setLinkUrl("");
-                  setShowLinkDialog(false);
-                }
-              }}
-            />
-            <div
-              style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}
-            >
-              <button
-                onClick={() => {
-                  setLinkUrl("");
-                  setShowLinkDialog(false);
-                }}
-                style={{
-                  background: "#f8f9fa",
-                  border: "1px solid #ddd",
-                  color: "#333",
-                  padding: "8px 16px",
-                  borderRadius: 4,
-                  fontSize: 14,
-                  cursor: "pointer",
-                }}
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={() => {
-                  if (linkUrl.trim()) {
-                    restoreSelection();
-                    execCommand("createLink", linkUrl.trim());
-                  }
-                  setLinkUrl("");
-                  setShowLinkDialog(false);
-                }}
-                disabled={!linkUrl.trim()}
-                style={{
-                  background: linkUrl.trim() ? "#333" : "#ccc",
-                  border: "none",
-                  color: "#fff",
-                  padding: "8px 16px",
-                  borderRadius: 4,
-                  fontSize: 14,
-                  cursor: linkUrl.trim() ? "pointer" : "not-allowed",
-                }}
-              >
-                挿入
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
+
 async function waitForAuthReady(timeout = 3000): Promise<any | null> {
   const auth = getClientAuth();
   if (!auth) return null;
@@ -510,6 +536,7 @@ export default function TargetSettingsPage() {
   const [mailTemplateB, setMailTemplateB] = useState("");
   const [mailSubjectA, setMailSubjectA] = useState("");
   const [mailSubjectB, setMailSubjectB] = useState("");
+  const subjectRef = useRef<HTMLInputElement | null>(null);
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -714,7 +741,21 @@ export default function TargetSettingsPage() {
             enabled: !!segDraft.enabled,
             priority: Number(segDraft.priority) || 0,
             conditions: segDraft.conditions,
-            actions: segDraft.actions,
+            actions: {
+              sms: {
+                enabled: !!segDraft.actions.sms.enabled,
+                // for sms: replace any placeholder span (if any) with token text
+                text: segDraft.actions.sms.text,
+              },
+              mail: {
+                enabled: !!segDraft.actions.mail.enabled,
+                subject: segDraft.actions.mail.subject,
+                // serialize html body with spans -> tokens
+                body: serializePlaceholdersFromHtml(
+                  segDraft.actions.mail.body || ""
+                ),
+              },
+            },
             updatedAt: serverTimestamp(),
           }
         );
@@ -726,7 +767,19 @@ export default function TargetSettingsPage() {
           enabled: !!segDraft.enabled,
           priority: Number(segDraft.priority) || 0,
           conditions: segDraft.conditions,
-          actions: segDraft.actions,
+          actions: {
+            sms: {
+              enabled: !!segDraft.actions.sms.enabled,
+              text: segDraft.actions.sms.text,
+            },
+            mail: {
+              enabled: !!segDraft.actions.mail.enabled,
+              subject: segDraft.actions.mail.subject,
+              body: serializePlaceholdersFromHtml(
+                segDraft.actions.mail.body || ""
+              ),
+            },
+          },
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -799,7 +852,16 @@ export default function TargetSettingsPage() {
   }
 
   function editSegment(seg: Segment) {
-    setSegDraft({ ...seg });
+    // convert stored token body (if any) into editor-friendly HTML with placeholder spans
+    const converted = { ...seg } as any;
+    try {
+      if (converted.actions?.mail?.body) {
+        converted.actions.mail.body = tokensToHtml(converted.actions.mail.body);
+      }
+    } catch (e) {
+      // ignore
+    }
+    setSegDraft({ ...converted });
     setSegFormOpen(true);
   }
 
@@ -1153,6 +1215,16 @@ export default function TargetSettingsPage() {
           {/* SMS内容 */}
           {segDraft.actions.sms.enabled && (
             <div style={{ marginBottom: 20 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
+                <div style={{ fontSize: 13, color: "#666" }}>SMS本文</div>
+              </div>
               <textarea
                 value={segDraft.actions.sms.text}
                 onChange={(e) =>
@@ -1178,35 +1250,130 @@ export default function TargetSettingsPage() {
                   lineHeight: "1.4",
                 }}
               />
+              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => {
+                    const token = "{{applicant_name}}";
+                    setSegDraft((s) => ({
+                      ...s,
+                      actions: {
+                        ...s.actions,
+                        sms: {
+                          ...s.actions.sms,
+                          text: (s.actions.sms.text || "") + token,
+                        },
+                      },
+                    }));
+                  }}
+                  style={{
+                    padding: "6px 8px",
+                    borderRadius: 4,
+                    border: "1px solid #ddd",
+                    background: "#fff",
+                  }}
+                >
+                  氏名
+                </button>
+                <button
+                  onClick={() => {
+                    // use canonical key matching Firestore/jobbox parsing
+                    const token = "{{job_title}}";
+                    setSegDraft((s) => ({
+                      ...s,
+                      actions: {
+                        ...s.actions,
+                        sms: {
+                          ...s.actions.sms,
+                          text: (s.actions.sms.text || "") + token,
+                        },
+                      },
+                    }));
+                  }}
+                  style={{
+                    padding: "6px 8px",
+                    borderRadius: 4,
+                    border: "1px solid #ddd",
+                    background: "#fff",
+                  }}
+                >
+                  職種
+                </button>
+                <button
+                  onClick={() => {
+                    // use canonical key matching Firestore/jobbox parsing
+                    const token = "{{account_name}}";
+                    setSegDraft((s) => ({
+                      ...s,
+                      actions: {
+                        ...s.actions,
+                        sms: {
+                          ...s.actions.sms,
+                          text: (s.actions.sms.text || "") + token,
+                        },
+                      },
+                    }));
+                  }}
+                  style={{
+                    padding: "6px 8px",
+                    borderRadius: 4,
+                    border: "1px solid #ddd",
+                    background: "#fff",
+                  }}
+                >
+                  会社名
+                </button>
+              </div>
             </div>
           )}
 
           {/* メール内容 */}
           {segDraft.actions.mail.enabled && (
             <div style={{ marginBottom: 20 }}>
-              <input
-                type="text"
-                value={segDraft.actions.mail.subject}
-                onChange={(e) =>
-                  setSegDraft((s) => ({
-                    ...s,
-                    actions: {
-                      ...s.actions,
-                      mail: { ...s.actions.mail, subject: e.target.value },
-                    },
-                  }))
-                }
-                placeholder="件名"
+              <div
                 style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: "1px solid #ddd",
-                  borderRadius: 4,
-                  fontSize: 14,
-                  boxSizing: "border-box",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
                   marginBottom: 8,
                 }}
-              />
+              >
+                <div style={{ fontSize: 13, color: "#666" }}>メール本文</div>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
+                <input
+                  ref={subjectRef}
+                  type="text"
+                  value={segDraft.actions.mail.subject}
+                  onChange={(e) =>
+                    setSegDraft((s) => ({
+                      ...s,
+                      actions: {
+                        ...s.actions,
+                        mail: { ...s.actions.mail, subject: e.target.value },
+                      },
+                    }))
+                  }
+                  placeholder="件名"
+                  style={{
+                    flex: 1,
+                    padding: "8px 12px",
+                    border: "1px solid #ddd",
+                    borderRadius: 4,
+                    fontSize: 14,
+                    boxSizing: "border-box",
+                  }}
+                />
+                <div style={{ display: "flex", gap: 6 }}>
+                  {/* Subject buttons removed: use editor toolbar buttons which now insert into subject when it has focus */}
+                </div>
+              </div>
 
               <RichTextEditor
                 value={segDraft.actions.mail.body}
@@ -1219,6 +1386,55 @@ export default function TargetSettingsPage() {
                     },
                   }))
                 }
+                onInsertIntoSubject={(token: string) => {
+                  // Compute caret pos (if available), update React state, then restore caret
+                  let start: number | null = null;
+                  let end: number | null = null;
+                  try {
+                    const ref = subjectRef.current as HTMLInputElement | null;
+                    if (ref) {
+                      start = (ref.selectionStart ??
+                        ref.value.length) as number;
+                      end = (ref.selectionEnd ?? start) as number;
+                    }
+                  } catch (e) {}
+
+                  setSegDraft((s) => {
+                    const cur = s.actions.mail.subject || "";
+                    let newVal = cur + token;
+                    try {
+                      const ref = subjectRef.current as HTMLInputElement | null;
+                      if (ref && start !== null && end !== null) {
+                        const v = ref.value || "";
+                        newVal = v.slice(0, start) + token + v.slice(end);
+                      }
+                    } catch (e) {}
+                    return {
+                      ...s,
+                      actions: {
+                        ...s.actions,
+                        mail: { ...s.actions.mail, subject: newVal },
+                      },
+                    };
+                  });
+
+                  // Restore caret after React has applied the state change
+                  if (start !== null) {
+                    setTimeout(() => {
+                      try {
+                        const ref =
+                          subjectRef.current as HTMLInputElement | null;
+                        if (ref) {
+                          const pos = start! + token.length;
+                          ref.setSelectionRange(pos, pos);
+                          ref.focus();
+                        }
+                      } catch (e) {}
+                    }, 0);
+                  }
+                  return true;
+                }}
+                subjectRef={subjectRef}
                 placeholder="お忙しい中ご応募ありがとうございます。xxx株式会社です。下記よりLINE登録をお願いいたします！https://line..."
               />
             </div>
