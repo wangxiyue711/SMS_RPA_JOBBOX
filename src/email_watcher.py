@@ -1149,47 +1149,12 @@ def write_sms_history(uid: str, doc: dict) -> bool:
         if r.status_code in (200, 201):
             return True
         else:
-            print('Failed to write sms_history', r.status_code, r.text[:1000])
+            logger.error(f'Firestore書き込み失敗: {r.status_code}, {r.text[:500]}')
             return False
     except Exception as e:
         print('Exception writing sms_history:', e)
         return False
 
-
-def write_mail_history(uid: str, doc: dict) -> bool:
-    """Write a minimal mail_history document under accounts/{uid}/mail_history using service account.
-
-    Returns True on success.
-    """
-    sa_file = _find_service_account_file()
-    if not sa_file:
-        print('service-account file not found; cannot write mail_history')
-        return False
-    try:
-        import json
-        from google.oauth2 import service_account
-        from google.auth.transport.requests import Request
-        with open(sa_file, 'r', encoding='utf-8') as f:
-            sa = json.load(f)
-        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
-        creds.refresh(Request())
-        token = creds.token
-        project = sa.get('project_id')
-        if not project:
-            print('service account missing project_id')
-            return False
-        url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/mail_history'
-        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-        body = {'fields': _make_fields_for_firestore(doc)}
-        r = requests.post(url, headers=headers, json=body, timeout=15)
-        if r.status_code in (200, 201):
-            return True
-        else:
-            print('Failed to write mail_history', r.status_code, r.text[:1000])
-            return False
-    except Exception as e:
-        print('Exception writing mail_history:', e)
-        return False
 
 
 def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll_seconds=30):
@@ -1614,6 +1579,15 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                             if matching_segment['actions']['mail']['enabled']:
                                                 mail_target_segment = matching_segment
                                         
+                                        # Initialize flags for SMS and Mail (ensure availability in all branches)
+                                        sms_attempted = False
+                                        sms_ok = False
+                                        sms_info = {}
+                                        mail_attempted = False
+                                        mail_ok = False
+                                        mail_info = {}
+                                        needs_combined_status = False
+
                                         # For backward compatibility, keep is_target for SMS logic
                                         is_target = sms_target_segment is not None
                                         
@@ -1626,6 +1600,26 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                             print(f'この応募者はメールの送信対象です。（「{mail_target_segment["title"]}」セグメントに該当）')
                                         else:
                                             print('この応募者はメールの送信対象ではありません。')
+
+                                        # Determine if we need combined status logic
+                                        if sms_target_segment and mail_target_segment:
+                                            # Check if both SMS and Mail will actually be attempted
+                                            tel = detail.get('tel') or detail.get('電話番号') or ''
+                                            try:
+                                                sms_action = sms_target_segment['actions']['sms']
+                                                tpl = sms_action['text'] if sms_action.get('enabled') else None
+                                                will_attempt_sms = bool(tel and tpl and sms_action.get('enabled'))
+                                            except Exception:
+                                                will_attempt_sms = False
+                                            
+                                            try:
+                                                mail_action = mail_target_segment['actions']['mail']
+                                                to_email = detail.get('email', '').strip()
+                                                will_attempt_mail = bool(mail_action.get('enabled') and mail_action.get('subject') and mail_action.get('body') and to_email)
+                                            except Exception:
+                                                will_attempt_mail = False
+                                            
+                                            needs_combined_status = will_attempt_sms and will_attempt_mail
                                         
                                         # Handle SMS sending
                                         if sms_target_segment:
@@ -1803,11 +1797,6 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 return (True, {'note': 'logged'})
 
                                             tel = detail.get('tel') or detail.get('電話番号') or ''
-                                            # Ensure mail-related flags are initialized so later memo writing
-                                            # does not reference undefined locals (UnboundLocalError).
-                                            mail_attempted = False
-                                            mail_ok = False
-                                            mail_info = {}
                                             
                                             # Use segment's SMS content
                                             sms_action = sms_target_segment['actions']['sms']
@@ -1854,8 +1843,12 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         tpl_to_send = tpl
 
                                                     success, info = send_sms_router(norm, tpl_to_send)
-                                                    # If not dry-run, record history for both success and failure
-                                                    if not dry_run_env and uid:
+                                                    sms_attempted = True
+                                                    sms_ok = success
+                                                    sms_info = info
+                                                    
+                                                    # If not combined status needed, write SMS history immediately
+                                                    if not needs_combined_status and not dry_run_env and uid:
                                                         try:
                                                             # determine status_code if available
                                                             status_code = None
@@ -2018,16 +2011,13 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                         if mail_target_segment:
                                             try:
                                                 mail_action = mail_target_segment['actions']['mail']
-                                                print(f'[DEBUG] mail_action: enabled={mail_action.get("enabled")}, subject="{mail_action.get("subject")}", body_length={len(mail_action.get("body", ""))}')
                                                 if mail_action['enabled'] and mail_action['subject'] and mail_action['body']:
                                                     to_email = detail.get('email', '').strip()
-                                                    print(f'[DEBUG] 応募者のメールアドレス: {to_email}')
                                                     if to_email:
                                                         # Get mail settings (sender credentials)
                                                         mail_cfg = _get_mail_settings(str(uid) if uid is not None else "")
                                                         sender = mail_cfg.get('email', '')
                                                         sender_pass = mail_cfg.get('appPass', '')
-                                                        print(f'[DEBUG] 送信者設定: sender={sender}, sender_pass={"*" * len(sender_pass) if sender_pass else "None"}')
                                                         
                                                         if sender and sender_pass:
                                                             mail_attempted = True
@@ -2125,29 +2115,36 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             else:
                                                                 # Send HTML email (body may be HTML; apply_template_tokens already HTML-escapes values if needed)
                                                                 mail_ok, mail_info = _send_html_mail(sender, sender_pass, to_email, subject_to_send, body_to_send)
+                                                            
+                                                            mail_attempted = True
                                                             if mail_ok:
                                                                 print(f'メール送信成功: {to_email} (件名: {subject_to_send})')
                                                             else:
                                                                 print(f'メール送信失敗: {to_email} - {mail_info}')
 
-                                                            # Write mail_history for this attempt (unless dry-run)
+                                                            # If not combined status needed, write mail history immediately
                                                             mail_dry_env = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
-                                                            if not mail_dry_env and uid:
+
+                                                            if not needs_combined_status and not mail_dry_env and uid:
                                                                 try:
                                                                     rec = {
                                                                         'name': detail.get('name'),
+                                                                        'gender': detail.get('gender'),
+                                                                        'birth': detail.get('birth'),
                                                                         'email': detail.get('email'),
                                                                         'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                                        'addr': detail.get('addr'),
+                                                                        'school': detail.get('school'),
                                                                         'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
-                                                                        'status': '送信済' if mail_ok else '送信失敗',
+                                                                        'status': '送信済（M）' if mail_ok else '送信失敗（M）',  # M for Mail
                                                                         'response': mail_info if isinstance(mail_info, dict) else {'note': str(mail_info)},
                                                                         'sentAt': int(time.time())
                                                                     }
-                                                                    ok_write_mail = write_mail_history(str(uid), rec)
-                                                                    if not ok_write_mail:
-                                                                        print('Failed to write mail_history')
+                                                                    ok_write_history = write_sms_history(str(uid), rec)  # Use same table as SMS
+                                                                    if not ok_write_history:
+                                                                        logger.error('履歴の書き込みに失敗しました（メール）')
                                                                 except Exception as e:
-                                                                    print('Exception when writing mail_history:', e)
+                                                                    print(f'履歴書き込み例外（メール）: {e}')
                                                         else:
                                                             print('メール設定が不完全です（送信者またはパスワードが不足）')
                                                             mail_info = {'error': 'incomplete mail settings'}
@@ -2186,6 +2183,58 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                             except Exception as e:
                                                 print('メール memo 処理で例外:', e)
                                         
+                                        # Handle combined status history writing if both SMS and Mail were attempted
+                                        if needs_combined_status and uid:
+                                            dry_run_sms = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
+                                            dry_run_mail = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
+                                            
+                                            if not (dry_run_sms and dry_run_mail):  # Write history unless both are dry-run
+                                                try:
+                                                    # Determine combined status
+                                                    if sms_attempted and mail_attempted:
+                                                        if sms_ok and mail_ok:
+                                                            combined_status = '送信済'
+                                                        elif sms_ok and not mail_ok:
+                                                            combined_status = '送信済(SMS)+送信失敗(M)'
+                                                        elif not sms_ok and mail_ok:
+                                                            combined_status = '送信失敗(SMS)+送信済(M)'
+                                                        else:
+                                                            combined_status = '送信失敗'
+                                                    elif sms_attempted and not mail_attempted:
+                                                        combined_status = '送信済(SMS)' if sms_ok else '送信失敗(SMS)'
+                                                    elif not sms_attempted and mail_attempted:
+                                                        combined_status = '送信済(M)' if mail_ok else '送信失敗(M)'
+                                                    else:
+                                                        combined_status = '送信失敗'
+                                                    
+                                                    # Create combined response info
+                                                    combined_response = {}
+                                                    if sms_attempted and isinstance(sms_info, dict):
+                                                        combined_response['sms'] = sms_info
+                                                    if mail_attempted and isinstance(mail_info, dict):
+                                                        combined_response['mail'] = mail_info
+                                                    
+                                                    # Create combined history record
+                                                    rec = {
+                                                        'name': detail.get('name'),
+                                                        'gender': detail.get('gender'),
+                                                        'birth': detail.get('birth'),
+                                                        'email': detail.get('email'),
+                                                        'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                        'addr': detail.get('addr'),
+                                                        'school': detail.get('school'),
+                                                        'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                        'status': combined_status,
+                                                        'response': combined_response if combined_response else {'note': 'combined attempt'},
+                                                        'sentAt': int(time.time())
+                                                    }
+                                                    
+                                                    ok_write_combined = write_sms_history(str(uid), rec)
+                                                    if not ok_write_combined:
+                                                        logger.error('組み合わせ履歴の書き込みに失敗しました')
+                                                except Exception as e:
+                                                    logger.error(f'組み合わせ履歴書き込み例外: {e}')
+                                        
                                         else:
                                             # For non-target applicants, use the old mail system (if configured)
                                             dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
@@ -2204,22 +2253,30 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 except Exception as e:
                                                     mail_sent_ok, mail_sent_flag, mail_sent_info = (False, False, {'error': str(e)})
 
-                                                # Write mail_history if not dry-run
+                                                # Write sms_history if not dry-run (same table as SMS, with M suffix)
                                                 try:
                                                     mail_dry_env2 = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
-                                                    if not mail_dry_env2 and uid:
+
+                                                    if not mail_dry_env2 and uid and mail_sent_flag:  # Only write if mail was actually attempted
+                                                        # Add (M) suffix to status to distinguish mail from SMS
+                                                        base_status = '送信済' if (mail_sent_ok and mail_sent_flag) else ('送信失敗' if mail_sent_ok and not mail_sent_flag else '送信抑制')
+                                                        mail_status = f'{base_status}（M）'
                                                         rec = {
                                                             'name': detail.get('name'),
+                                                            'gender': detail.get('gender'),
+                                                            'birth': detail.get('birth'),
                                                             'email': detail.get('email'),
                                                             'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                            'addr': detail.get('addr'),
+                                                            'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
-                                                            'status': '送信済' if (mail_sent_ok and mail_sent_flag) else ('送信失敗' if mail_sent_ok and not mail_sent_flag else '送信抑制'),
+                                                            'status': mail_status,
                                                             'response': mail_sent_info if isinstance(mail_sent_info, dict) else {'note': str(mail_sent_info)},
                                                             'sentAt': int(time.time())
                                                         }
-                                                        ok_write_mail2 = write_mail_history(str(uid), rec)
+                                                        ok_write_mail2 = write_sms_history(str(uid), rec)  # Use same table as SMS
                                                         if not ok_write_mail2:
-                                                            print('Failed to write mail_history (non-target)')
+                                                            logger.error('Failed to write mail_history (non-target)')
                                                 except Exception as e:
                                                     print('Exception when writing mail_history (non-target):', e)
                                             except Exception as e:

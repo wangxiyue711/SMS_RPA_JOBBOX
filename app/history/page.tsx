@@ -56,15 +56,54 @@ export default function HistoryPage() {
       if (!user) throw new Error("未ログインです。ログインしてください。");
       const db = getFirestore();
       const uid = (user as any).uid;
-      // collection path: accounts/{uid}/sms_history
-      const collRef = collection(db, "accounts", uid, "sms_history");
-      const q = query(collRef, orderBy("sentAt", "desc"), limit(100));
-      const snap = await getDocs(q);
+
+      // Read from sms_history collection (unified SMS and mail records)
       const out: any[] = [];
-      snap.forEach((d) => {
-        out.push({ id: d.id, ...(d.data() as any) });
+
+      try {
+        const smsCollRef = collection(db, "accounts", uid, "sms_history");
+        const smsQ = query(smsCollRef, orderBy("sentAt", "desc"), limit(100));
+        const smsSnap = await getDocs(smsQ);
+        smsSnap.forEach((d) => {
+          out.push({ id: d.id, ...(d.data() as any) });
+        });
+      } catch (e) {
+        console.warn("Failed to load sms_history:", e);
+      }
+
+      // Read mail_history for backward compatibility (old mail records only)
+      try {
+        const mailCollRef = collection(db, "accounts", uid, "mail_history");
+        const mailQ = query(mailCollRef, orderBy("sentAt", "desc"), limit(50));
+        const mailSnap = await getDocs(mailQ);
+        mailSnap.forEach((d) => {
+          const data = d.data() as any;
+          // Add (M) suffix to status if not already present for old mail records
+          if (
+            data.status &&
+            !data.status.includes("(M)") &&
+            !data.status.includes("（M）")
+          ) {
+            data.status = data.status.includes("送信済")
+              ? "送信済（M）"
+              : data.status.includes("送信失敗")
+              ? "送信失敗（M）"
+              : `${data.status}（M）`;
+          }
+          out.push({ id: d.id, source: "mail_history", ...data });
+        });
+      } catch (e) {
+        console.warn("Failed to load mail_history:", e);
+      }
+
+      // Sort all records by sentAt descending and take top 100
+      out.sort((a, b) => {
+        const aTime = a.sentAt || 0;
+        const bTime = b.sentAt || 0;
+        return bTime - aTime;
       });
-      setRows(out);
+
+      setRows(out.slice(0, 100));
       // reset page to first when new data is loaded
       setPage(0);
     } catch (e) {
@@ -493,9 +532,12 @@ export default function HistoryPage() {
               </tr>
             </thead>
             <tbody>
-              {rows
-                .slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
-                .map((r, idx) => (
+              {(() => {
+                const slicedRows = rows.slice(
+                  page * PAGE_SIZE,
+                  page * PAGE_SIZE + PAGE_SIZE
+                );
+                return slicedRows.map((r, idx) => (
                   <tr
                     key={r.id}
                     style={{
@@ -651,7 +693,8 @@ export default function HistoryPage() {
                       })()}
                     </td>
                   </tr>
-                ))}
+                ));
+              })()}
             </tbody>
           </table>
           {/* pagination controls */}

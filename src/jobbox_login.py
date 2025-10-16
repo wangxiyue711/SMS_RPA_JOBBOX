@@ -307,7 +307,7 @@ return 'NOT_FOUND';
                         time.sleep(0.6)
                         seen_pairs.add(key)
                     except Exception as e:
-                        print(f"[DEBUG] 行処理で例外: {e}")
+
                         try: self.driver.switch_to.default_content()
                         except: pass
                         continue
@@ -503,21 +503,7 @@ return 'NOT_FOUND';
                 
                 if not employer_name:
                     print("職位詳細ページで勤務先名が見つかりませんでした")
-                    # デバッグ情報：ページ上の「勤務先」を含む全要素を出力
-                    try:
-                        print("=== デバッグ：ページ上の'勤務先'を含む全要素 ===")
-                        debug_elements = self.driver.find_elements(By.XPATH, "//*[contains(.,'勤務先')]")
-                        for i, elem in enumerate(debug_elements[:10]):  # 出力を最初の10個に制限
-                            try:
-                                tag = elem.tag_name
-                                text = elem.text[:50] if elem.text else ''  # テキスト長を制限
-                                value = elem.get_attribute('value') or ''
-                                print(f"要素{i+1}: <{tag}> text='{text}' value='{value}'")
-                            except:
-                                pass
-                        print("=== デバッグ終了 ===")
-                    except Exception as debug_e:
-                        print(f"デバッグ情報取得エラー: {debug_e}")
+
                 
                 # 個人情報ページに戻る
                 print("個人情報ページに戻ります...")
