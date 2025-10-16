@@ -344,12 +344,14 @@ def _find_service_account_file():
 
 
 def _get_mail_settings(uid: str) -> dict:
-    """Read accounts/{uid}/mail_settings/settings from Firestore using service account file."""
+    """Read accounts/{uid}/mail_settings/settings from Firestore using service account file.
+
+    Returns dict with possible keys 'email' and 'appPass'. Empty dict on failure.
+    """
     sa_file = _find_service_account_file()
     if not sa_file:
         return {}
     try:
-        import json
         from google.oauth2 import service_account
         from google.auth.transport.requests import Request
         with open(sa_file, 'r', encoding='utf-8') as f:
@@ -359,7 +361,7 @@ def _get_mail_settings(uid: str) -> dict:
         token = creds.token
     except Exception:
         return {}
-    # proceed to read the mail_settings document
+
     project = sa.get('project_id') if isinstance(sa, dict) else None
     if not project:
         return {}
@@ -379,66 +381,7 @@ def _get_mail_settings(uid: str) -> dict:
         return res
     except Exception:
         return {}
-
-
-def _get_target_segments(uid: Optional[str]) -> list:
-    """Read all enabled segments from accounts/{uid}/target_segments collection from Firestore."""
-    sa_file = _find_service_account_file()
-    if not sa_file:
-        return []
-    try:
-        import json
-        from google.oauth2 import service_account
-        from google.auth.transport.requests import Request
-        with open(sa_file, 'r', encoding='utf-8') as f:
-            sa = json.load(f)
-        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
-        creds.refresh(Request())
-        token = creds.token
-    except Exception:
-        return []
     
-    project = sa.get('project_id') if isinstance(sa, dict) else None
-    if not project:
-        return []
-    
-    # Query the target_segments collection
-    collection_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/target_segments'
-    headers = {'Authorization': f'Bearer {token}'}
-    
-    try:
-        r = requests.get(collection_url, headers=headers, timeout=10)
-        if r.status_code != 200:
-            return []
-        
-        data = r.json()
-        documents = data.get('documents', [])
-        
-        segments = []
-        for doc in documents:
-            fields = doc.get('fields', {})
-            
-            # Extract segment data
-            segment = {
-                'id': doc.get('name', '').split('/')[-1],
-                'title': _extract_string_value(fields.get('title', {})),
-                'enabled': _extract_bool_value(fields.get('enabled', {})),
-                'priority': _extract_int_value(fields.get('priority', {})),
-                'conditions': _extract_conditions(fields.get('conditions', {})),
-                'actions': _extract_actions(fields.get('actions', {}))
-            }
-            
-            # Only include enabled segments
-            if segment['enabled']:
-                segments.append(segment)
-        
-        # Sort by priority (lower number = higher priority)
-        segments.sort(key=lambda x: x['priority'])
-        return segments
-        
-    except Exception as e:
-        print(f"Error reading target_segments: {e}")
-        return []
 
 
 def _extract_string_value(field):
@@ -475,6 +418,58 @@ def _extract_name_types(name_types_field):
             'alpha': _extract_bool_value(fields.get('alpha', {}))
         }
     return {}
+
+
+def _get_target_segments(uid: Optional[str]) -> list:
+    """Read enabled segments from accounts/{uid}/target_segments.
+
+    Returns list of segment dicts sorted by priority. Each segment contains
+    id, title, enabled, priority, conditions, actions.
+    """
+    sa_file = _find_service_account_file()
+    if not sa_file or not uid:
+        return []
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        with open(sa_file, 'r', encoding='utf-8') as f:
+            sa = json.load(f)
+        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+        creds.refresh(Request())
+        token = creds.token
+    except Exception:
+        return []
+
+    project = sa.get('project_id') if isinstance(sa, dict) else None
+    if not project:
+        return []
+
+    collection_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/target_segments'
+    headers = {'Authorization': f'Bearer {token}'}
+    try:
+        r = requests.get(collection_url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        documents = data.get('documents', [])
+        segments = []
+        for doc in documents:
+            fields = doc.get('fields', {})
+            seg = {
+                'id': doc.get('name', '').split('/')[-1],
+                'title': _extract_string_value(fields.get('title', {})),
+                'enabled': _extract_bool_value(fields.get('enabled', {})),
+                'priority': _extract_int_value(fields.get('priority', {})),
+                'conditions': _extract_conditions(fields.get('conditions', {})),
+                'actions': _extract_actions(fields.get('actions', {})),
+            }
+            if seg['enabled']:
+                segments.append(seg)
+        segments.sort(key=lambda x: x.get('priority', 0))
+        return segments
+    except Exception as e:
+        print(f'Error reading target_segments: {e}')
+        return []
 
 def _extract_genders(genders_field):
     """Extract genders from Firestore mapValue."""
@@ -1070,71 +1065,264 @@ def write_sms_history(uid: str, doc: dict) -> bool:
     if not sa_file:
         print('service-account file not found; cannot write history')
         return False
-    # Duplicate-send guard: if a recent sms_history with same oubo_no and tel and status 'sent'
-    # exists within a short time window, skip writing to avoid duplicates.
+
+    # Helper: load service account and obtain access token
+    sa = None
+    token = None
+    project = None
     try:
-        try:
-            with open(sa_file, 'r', encoding='utf-8') as f:
-                sa = json.load(f) # type: ignore
-        except Exception:
-            sa = None
-        if sa and uid and doc:
-            project = sa.get('project_id')
-            if project:
-                # prepare a structuredQuery to find recent matching records
-                oubo = doc.get('oubo_no') or ''
-                tel = doc.get('tel') or ''
-                now_ts = int(time.time())
-                recent_threshold = 120  # seconds
-                body = {
-                    "structuredQuery": {
-                        "from": [{"collectionId": "sms_history"}],
-                        "where": {
-                            "compositeFilter": {
-                                "op": "AND",
-                                "filters": [
-                                    {"fieldFilter": {"field": {"fieldPath": "oubo_no"}, "op": "EQUAL", "value": {"stringValue": str(oubo)}}},
-                                    {"fieldFilter": {"field": {"fieldPath": "tel"}, "op": "EQUAL", "value": {"stringValue": str(tel)}}},
-                                    {"fieldFilter": {"field": {"fieldPath": "status"}, "op": "EQUAL", "value": {"stringValue": "送信済"}}},
-                                    {"fieldFilter": {"field": {"fieldPath": "sentAt"}, "op": "GREATER_THAN", "value": {"integerValue": str(now_ts - recent_threshold)}}}
-                                ]
-                            }
-                        },
-                        "limit": 1
-                    }
-                }
-                # get short-lived token
-                try:
-                    from google.oauth2 import service_account
-                    from google.auth.transport.requests import Request
-                    creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
-                    creds.refresh(Request())
-                    token = creds.token
-                    run_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents:runQuery'
-                    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-                    r = requests.post(run_url, headers=headers, json=body, timeout=8)
-                    if r.status_code == 200:
-                        try:
-                            results = r.json()
-                            if isinstance(results, list) and len(results) > 0:
-                                # if any document matched, consider duplicate
-                                # Each result entry may be an object with document key when matched
-                                for entry in results:
-                                    if entry and entry.get('document'):
-                                        print('Detected recent duplicate sms_history entry; skipping write')
-                                        return True
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    try:
-        import json
-        from google.oauth2 import service_account
-        from google.auth.transport.requests import Request
         with open(sa_file, 'r', encoding='utf-8') as f:
             sa = json.load(f)
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+        creds.refresh(Request())
+        token = creds.token
+        project = sa.get('project_id')
+    except Exception:
+        sa = None
+        token = None
+        project = None
+
+    # Try multiple matching strategies to find an existing history doc to merge into.
+    # Strategies (priority order):
+    # 1) oubo_no + tel (recent window)
+    # 2) oubo_no + email (recent)
+    # 3) tel + email (recent)
+    # 4) email only (within short time window)
+    try:
+        if token and project and uid and doc:
+            oubo = (doc.get('oubo_no') or doc.get('oubo') or '').strip()
+            tel = (doc.get('tel') or doc.get('電話番号') or '').strip()
+            email_addr = (doc.get('email') or doc.get('メール') or '').strip()
+            now_ts = int(time.time())
+            recent_threshold = 300
+            short_threshold = 120
+            run_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents:runQuery'
+            headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+            # helper to run a structuredQuery and return first document (or None)
+            def _run_query(filters, limit=1, order_by_sentAt=False):
+                body = {"structuredQuery": {"from": [{"collectionId": "sms_history"}], "limit": limit}}
+                if filters:
+                    if len(filters) == 1:
+                        body['structuredQuery']['where'] = filters[0]
+                    else:
+                        body['structuredQuery']['where'] = {"compositeFilter": {"op": "AND", "filters": filters}}
+                if order_by_sentAt:
+                    body['structuredQuery']['orderBy'] = [{"field": {"fieldPath": "sentAt"}, "direction": "DESC"}]
+                try:
+                    r = requests.post(run_url, headers=headers, json=body, timeout=8)
+                    if r.status_code != 200:
+                        return None
+                    results = r.json()
+                    for item in results:
+                        if item.get('document'):
+                            return item.get('document')
+                except Exception:
+                    return None
+                return None
+
+            # build simple fieldFilter helper
+            def ff(fieldPath, op, value, valueType='stringValue'):
+                return {"fieldFilter": {"field": {"fieldPath": fieldPath}, "op": op, "value": {valueType: str(value)}}}
+
+            # Strategy 1: oubo + tel (recent)
+            existing_doc = None
+            if oubo and tel:
+                filters = [ff('oubo_no', 'EQUAL', oubo), ff('tel', 'EQUAL', tel), ff('sentAt', 'GREATER_THAN', now_ts - recent_threshold, valueType='integerValue')]
+                existing_doc = _run_query(filters, limit=1, order_by_sentAt=True)
+
+            # Strategy 2: oubo + email
+            if not existing_doc and oubo and email_addr:
+                filters = [ff('oubo_no', 'EQUAL', oubo), ff('email', 'EQUAL', email_addr), ff('sentAt', 'GREATER_THAN', now_ts - recent_threshold, valueType='integerValue')]
+                existing_doc = _run_query(filters, limit=1, order_by_sentAt=True)
+
+            # Strategy 3: tel + email
+            if not existing_doc and tel and email_addr:
+                filters = [ff('tel', 'EQUAL', tel), ff('email', 'EQUAL', email_addr), ff('sentAt', 'GREATER_THAN', now_ts - recent_threshold, valueType='integerValue')]
+                existing_doc = _run_query(filters, limit=1, order_by_sentAt=True)
+
+            # Strategy 4: email only within short window
+            if not existing_doc and email_addr:
+                filters = [ff('email', 'EQUAL', email_addr), ff('sentAt', 'GREATER_THAN', now_ts - short_threshold, valueType='integerValue')]
+                existing_doc = _run_query(filters, limit=1, order_by_sentAt=True)
+
+            # Helper: read Firestore field value
+            def _read_field(f):
+                if not f:
+                    return None
+                if 'stringValue' in f:
+                    return f.get('stringValue')
+                if 'integerValue' in f:
+                    try:
+                        return int(f.get('integerValue'))
+                    except Exception:
+                        return f.get('integerValue')
+                if 'booleanValue' in f:
+                    return f.get('booleanValue')
+                if 'mapValue' in f:
+                    mv = f.get('mapValue', {}).get('fields', {})
+                    return {k: _read_field(v) for k, v in mv.items()}
+                return None
+
+            if existing_doc:
+                existing_name = existing_doc.get('name')
+                existing_fields = existing_doc.get('fields', {})
+
+                # extract existing channel states/responses
+                existing_sms_state = _read_field(existing_fields.get('sms_status'))
+                existing_mail_state = _read_field(existing_fields.get('mail_status'))
+                existing_resp = _read_field(existing_fields.get('response')) or {}
+                existing_sentAt = _read_field(existing_fields.get('sentAt'))
+
+                # infer incoming states from doc
+                inc_sms_state = None
+                inc_mail_state = None
+                inc_sms_resp = None
+                inc_mail_resp = None
+                # If caller provided explicit sms_status/mail_status use them
+                if doc.get('sms_status'):
+                    inc_sms_state = doc.get('sms_status')
+                if doc.get('mail_status'):
+                    inc_mail_state = doc.get('mail_status')
+                # else infer from status text
+                sraw = (doc.get('status') or '').lower()
+                if not inc_sms_state and ('送信済' in (doc.get('status') or '') or '済' in (doc.get('status') or '')) and '（m）' not in sraw and '（s）' in sraw:
+                    inc_sms_state = 'sent'
+                if not inc_mail_state and ('（m）' in (doc.get('status') or '') or '（M）' in (doc.get('status') or '') or 'mail' in sraw):
+                    # treat as mail attempt
+                    if '失敗' in (doc.get('status') or '') or 'fail' in sraw:
+                        inc_mail_state = 'failed'
+                    else:
+                        inc_mail_state = 'sent'
+                # responses
+                # read response into a local variable once so type-checkers can
+                # reason about its type (and to avoid calling .get on None)
+                resp = doc.get('response')
+                if isinstance(resp, dict):
+                    # try to separate sms vs mail keys if present
+                    if 'sms' in resp:
+                        inc_sms_resp = resp.get('sms')
+                    if 'mail' in resp:
+                        inc_mail_resp = resp.get('mail')
+                    # otherwise put as mail if email present
+                    if not inc_sms_resp and not inc_mail_resp:
+                        if email_addr:
+                            inc_mail_resp = resp
+                        else:
+                            inc_sms_resp = resp
+                else:
+                    # primitive response -> assign based on presence of tel/email
+                    if email_addr:
+                        inc_mail_resp = resp
+                    else:
+                        inc_sms_resp = resp
+
+                # merge states: incoming overrides existing for the channel
+                final_sms_state = existing_sms_state or None
+                final_mail_state = existing_mail_state or None
+                if inc_sms_state:
+                    final_sms_state = inc_sms_state
+                if inc_mail_state:
+                    final_mail_state = inc_mail_state
+
+                # normalize helper
+                def _norm(s):
+                    if not s:
+                        return None
+                    s2 = str(s).lower()
+                    if 'fail' in s2 or '失敗' in s2:
+                        return 'failed'
+                    if 'sent' in s2 or '送信' in s2 or '済' in s2:
+                        return 'sent'
+                    return s
+
+                final_sms_state = _norm(final_sms_state)
+                final_mail_state = _norm(final_mail_state)
+
+                # merge responses
+                final_resp = {}
+                if existing_resp and isinstance(existing_resp, dict):
+                    if 'sms' in existing_resp:
+                        final_resp['sms'] = existing_resp.get('sms')
+                    if 'mail' in existing_resp:
+                        final_resp['mail'] = existing_resp.get('mail')
+                if inc_sms_resp is not None:
+                    final_resp['sms'] = inc_sms_resp
+                if inc_mail_resp is not None:
+                    final_resp['mail'] = inc_mail_resp
+
+                # decide status string per user's rules
+                status_str = ''
+                if not final_sms_state and not final_mail_state:
+                    status_str = '対象外'
+                else:
+                    # failures reported as failed channels
+                    failed_parts = []
+                    sent_parts = []
+                    if final_mail_state == 'failed':
+                        failed_parts.append('M')
+                    if final_sms_state == 'failed':
+                        failed_parts.append('S')
+                    if final_mail_state == 'sent':
+                        sent_parts.append('M')
+                    if final_sms_state == 'sent':
+                        sent_parts.append('S')
+
+                    if failed_parts:
+                        status_str = '送信失敗（' + '+'.join(failed_parts) + '）'
+                    else:
+                        if sent_parts:
+                            order = []
+                            if 'M' in sent_parts:
+                                order.append('M')
+                            if 'S' in sent_parts:
+                                order.append('S')
+                            status_str = '送信済（' + '+'.join(order) + '）'
+                        else:
+                            status_str = '対象外'
+
+                # prepare write_doc fields
+                write_doc = {}
+                if oubo:
+                    write_doc['oubo_no'] = oubo
+                if tel:
+                    write_doc['tel'] = tel
+                if email_addr:
+                    write_doc['email'] = email_addr
+                write_doc['sentAt'] = int(existing_sentAt or now_ts)
+                write_doc['sms_status'] = final_sms_state
+                write_doc['mail_status'] = final_mail_state
+                if final_resp:
+                    write_doc['response'] = final_resp
+                write_doc['status'] = status_str
+
+                # PATCH existing document
+                try:
+                    patch_url = f'https://firestore.googleapis.com/v1/{existing_name}'
+                    r = requests.patch(patch_url, headers={**headers, 'Content-Type': 'application/json'}, json={'fields': _make_fields_for_firestore(write_doc)}, timeout=12)
+                    if r.status_code in (200, 201):
+                        try:
+                            print(f'Merged sms_history into {existing_name} status={write_doc.get("status")}')
+                        except Exception:
+                            pass
+                        return True
+                    else:
+                        print('Failed to patch existing sms_history:', r.status_code, r.text[:500])
+                except Exception as e:
+                    print('Exception patching existing sms_history:', e)
+
+    except Exception as e:
+        print('Error during matching existing sms_history (non-fatal):', e)
+
+    # Fallback: create a new sms_history document
+    try:
+        if not sa:
+            with open(sa_file, 'r', encoding='utf-8') as f:
+                sa = json.load(f)
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
         creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
         creds.refresh(Request())
         token = creds.token
@@ -1149,7 +1337,7 @@ def write_sms_history(uid: str, doc: dict) -> bool:
         if r.status_code in (200, 201):
             return True
         else:
-            logger.error(f'Firestore書き込み失敗: {r.status_code}, {r.text[:500]}')
+            print(f'Firestore書き込み失敗: {r.status_code}, {r.text[:500]}')
             return False
     except Exception as e:
         print('Exception writing sms_history:', e)
@@ -1157,7 +1345,7 @@ def write_sms_history(uid: str, doc: dict) -> bool:
 
 
 
-def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll_seconds=30):
+def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll_seconds=30):  # type: ignore
     print('IMAPサーバーに接続しています...')
     conn = imaplib.IMAP4_SSL(imap_host)
     conn.login(email_user, email_pass)
@@ -1830,10 +2018,20 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 else:
                                                     # Prepare data map for token substitution in SMS
                                                     try:
+                                                        # Provide canonical SMS data keys that match mail template tokens
+                                                        # so both SMS and Mail use the same set: applicant_name, job_title, employer_name
+                                                        company_val = detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
+                                                        # employer_name may be present from parsed email body; prefer that for publishing-company name
+                                                        employer_val = detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or company_val
                                                         sms_data = {
                                                             'applicant_name': detail.get('name'),
                                                             'job_title': detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle'),
-                                                            'company': detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
+                                                            # include both company/account and employer aliases for backward compatibility
+                                                            'company': company_val,
+                                                            'account_name': company_val,
+                                                            'employer_name': employer_val,
+                                                            'employer': employer_val,
+                                                            '会社名': employer_val,
                                                         }
                                                     except Exception:
                                                         sms_data = {}
@@ -1860,9 +2058,9 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 except Exception:
                                                                     status_code = None
                                                             if success:
-                                                                rec_status = '送信済'
+                                                                rec_status = '送信済（S）'
                                                             else:
-                                                                rec_status = f"送信失敗{status_code}" if status_code else '送信失敗'
+                                                                rec_status = '送信失敗（S）'
                                                             rec = {
                                                                 'name': detail.get('name'),
                                                                 'gender': detail.get('gender'),
@@ -2192,20 +2390,21 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 try:
                                                     # Determine combined status
                                                     if sms_attempted and mail_attempted:
+                                                        # both channels attempted
                                                         if sms_ok and mail_ok:
-                                                            combined_status = '送信済'
+                                                            combined_status = '送信済（M+S）'
                                                         elif sms_ok and not mail_ok:
-                                                            combined_status = '送信済(SMS)+送信失敗(M)'
+                                                            combined_status = '送信済（S）+送信失敗（M）'
                                                         elif not sms_ok and mail_ok:
-                                                            combined_status = '送信失敗(SMS)+送信済(M)'
+                                                            combined_status = '送信失敗（S）+送信済（M）'
                                                         else:
-                                                            combined_status = '送信失敗'
+                                                            combined_status = '送信失敗（M+S）'
                                                     elif sms_attempted and not mail_attempted:
-                                                        combined_status = '送信済(SMS)' if sms_ok else '送信失敗(SMS)'
+                                                        combined_status = '送信済（S）' if sms_ok else '送信失敗（S）'
                                                     elif not sms_attempted and mail_attempted:
-                                                        combined_status = '送信済(M)' if mail_ok else '送信失敗(M)'
+                                                        combined_status = '送信済（M）' if mail_ok else '送信失敗（M）'
                                                     else:
-                                                        combined_status = '送信失敗'
+                                                        combined_status = '送信失敗（S）'
                                                     
                                                     # Create combined response info
                                                     combined_response = {}
@@ -2283,22 +2482,30 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 print('メール送信処理中に例外が発生しました(対象外):', e)
                                             if not dry_run_env and uid:
                                                 try:
-                                                    rec = {
-                                                        'name': detail.get('name'),
-                                                        'gender': detail.get('gender'),
-                                                        'birth': detail.get('birth'),
-                                                        'email': detail.get('email'),
-                                                        'tel': detail.get('tel') or detail.get('電話番号') or '',
-                                                        'addr': detail.get('addr'),
-                                                        'school': detail.get('school'),
-                                                        'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
-                                                        'status': '対象外',
-                                                        'response': {'note': 'evaluated as not target'},
-                                                        'sentAt': int(time.time())
-                                                    }
-                                                    ok_write = write_sms_history(str(uid), rec)
-                                                    if not ok_write:
-                                                        print('Failed to write sms_history for target-out')
+                                                    # If any channel was attempted (SMS or Mail), do not write a
+                                                    # separate "対象外" record. This avoids duplicate rows when
+                                                    # one channel is intentionally disabled/off and the other
+                                                    # was sent or when an auto-reply mail was attempted.
+                                                    any_attempted = bool(locals().get('mail_sent_flag') or locals().get('mail_attempted') or locals().get('sms_attempted'))
+                                                    if any_attempted:
+                                                        print('Skipping target-out history write: a channel was attempted for this applicant')
+                                                    else:
+                                                        rec = {
+                                                            'name': detail.get('name'),
+                                                            'gender': detail.get('gender'),
+                                                            'birth': detail.get('birth'),
+                                                            'email': detail.get('email'),
+                                                            'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                            'addr': detail.get('addr'),
+                                                            'school': detail.get('school'),
+                                                            'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                            'status': '対象外',
+                                                            'response': {'note': 'evaluated as not target'},
+                                                            'sentAt': int(time.time())
+                                                        }
+                                                        ok_write = write_sms_history(str(uid), rec)
+                                                        if not ok_write:
+                                                            print('Failed to write sms_history for target-out')
                                                 except Exception as e:
                                                     print('Exception when writing sms_history for target-out:', e)
                                                 # 写入 Jobbox メモ为「RPA:対象外」，如果我们仍然持有 jb 会话且不是 dry-run
@@ -2475,63 +2682,6 @@ def send_sms_once(uid, to_number, template_type=None, live=False):
 
     # Pick template based on target_settings and rotate nextSmsTemplate.
     # NOTE: This uses the module-level pick_and_rotate_template (best-effort GET then PATCH).
-        project = sa.get('project_id')
-        if not project:
-            return 'A'
-
-        doc_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/target_settings/settings'
-        headers = {'Authorization': f'Bearer {token}'}
-        try:
-            r = requests.get(doc_url, headers=headers, timeout=8)
-            if r.status_code != 200:
-                return 'A'
-            data = r.json()
-            fields = data.get('fields', {})
-            useA = True if (not fields.get('smsUseA')) else (fields.get('smsUseA', {}).get('booleanValue') is True)
-            useB = True if (not fields.get('smsUseB')) else (fields.get('smsUseB', {}).get('booleanValue') is True)
-            next_t = 'A'
-            if fields.get('nextSmsTemplate') and fields.get('nextSmsTemplate').get('stringValue'):
-                next_t = fields.get('nextSmsTemplate').get('stringValue')
-
-            # Decide chosen and next
-            if next_t == 'A' and useA:
-                chosen = 'A'
-                new_next = 'B' if useB else 'A'
-            elif next_t == 'B' and useB:
-                chosen = 'B'
-                new_next = 'A' if useA else 'B'
-            else:
-                # fallback: pick A if available else B
-                if useA:
-                    chosen = 'A'
-                    new_next = 'B' if useB else 'A'
-                elif useB:
-                    chosen = 'B'
-                    new_next = 'A'
-                else:
-                    # none enabled -> default A
-                    return 'A'
-
-            # write back new_next (best-effort)
-            patch_body = {'fields': {'nextSmsTemplate': {'stringValue': new_next}}}
-            # PATCH to the document path
-            try:
-                # Use updateMask to avoid overwriting the full document (which
-                # can unintentionally clear other fields). Only update
-                # nextSmsTemplate.
-                r2 = requests.patch(
-                    doc_url,
-                    params={'updateMask.fieldPaths': 'nextSmsTemplate'},
-                    headers={**headers, 'Content-Type': 'application/json'},
-                    json=patch_body,
-                    timeout=8,
-                )
-                # ignore result; best-effort
-            except Exception:
-                pass
-            return chosen
-        except Exception:
-            return 'A'
 
     ts = _get_target_settings_top(uid)
     tpl = None
@@ -2648,7 +2798,7 @@ def send_sms_once(uid, to_number, template_type=None, live=False):
                     if live:
                         try:
                             # record the actual chosen_type used for this send
-                            rec = {'tel': norm, 'status': '送信済', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
+                            rec = {'tel': norm, 'status': '送信済（S）', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
                             write_sms_history(uid, rec)
                         except Exception:
                             pass
@@ -2657,7 +2807,7 @@ def send_sms_once(uid, to_number, template_type=None, live=False):
                     print('送信失敗(リトライ)', info)
                     if live:
                         try:
-                            rec = {'tel': norm, 'status': f'送信失敗{r2.status_code}', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
+                            rec = {'tel': norm, 'status': f'送信失敗（S）{r2.status_code}', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
                             write_sms_history(uid, rec)
                         except Exception:
                             pass
@@ -2672,7 +2822,7 @@ def send_sms_once(uid, to_number, template_type=None, live=False):
             if live:
                 try:
                     # record the actual chosen_type used for this send
-                    rec = {'tel': norm, 'status': '送信済', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
+                    rec = {'tel': norm, 'status': '送信済（S）', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
                     write_sms_history(uid, rec)
                 except Exception:
                     pass
@@ -2681,7 +2831,7 @@ def send_sms_once(uid, to_number, template_type=None, live=False):
             print('送信失敗', info)
             if live:
                 try:
-                    rec = {'tel': norm, 'status': f'送信失敗{r.status_code}', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
+                    rec = {'tel': norm, 'status': f'送信失敗（S）{r.status_code}', 'response': info, 'sentAt': int(time.time()), 'template': chosen_type}
                     write_sms_history(uid, rec)
                 except Exception:
                     pass
@@ -2690,7 +2840,7 @@ def send_sms_once(uid, to_number, template_type=None, live=False):
         # best-effort: record exception as failure in sms_history
         try:
             if live:
-                rec = {'tel': norm if 'norm' in locals() else to_number, 'status': '送信失敗', 'response': {'error': str(e)}, 'sentAt': int(time.time()), 'template': chosen_type if 'chosen_type' in locals() else None}
+                rec = {'tel': norm if 'norm' in locals() else to_number, 'status': '送信失敗（S）', 'response': {'error': str(e)}, 'sentAt': int(time.time()), 'template': chosen_type if 'chosen_type' in locals() else None}
                 write_sms_history(uid, rec)
         except Exception:
             pass

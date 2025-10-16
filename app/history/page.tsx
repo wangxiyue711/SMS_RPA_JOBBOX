@@ -247,9 +247,21 @@ export default function HistoryPage() {
         // If neither status nor response -> target out
         if (!hasStatus && !hasResponse) return "対象外";
 
-        // If status indicates sent explicitly
+        // If status already contains a detailed suffix (（M） or （S）) prefer to show it verbatim
         try {
           const s = String(r.status || "").trim();
+          if (
+            s &&
+            (s.indexOf("（M）") >= 0 ||
+              s.indexOf("(M)") >= 0 ||
+              s.indexOf("（S）") >= 0 ||
+              s.indexOf("(S)") >= 0 ||
+              s.indexOf("M+S") >= 0 ||
+              s.indexOf("M+S") >= 0)
+          ) {
+            return s; // show detailed status as-is (e.g. 送信済（M）/送信済（S）/送信済（M+S）)
+          }
+          // backward-compat: existing coarse logic
           if (
             s === "送信済" ||
             s.startsWith("送信済") ||

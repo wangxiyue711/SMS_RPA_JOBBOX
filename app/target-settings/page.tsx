@@ -1300,8 +1300,8 @@ export default function TargetSettingsPage() {
                 </button>
                 <button
                   onClick={() => {
-                    // use canonical key matching Firestore/jobbox parsing
-                    const token = "{{account_name}}";
+                    // use canonical key matching mail template tokens (employer_name)
+                    const token = "{{employer_name}}";
                     setSegDraft((s) => ({
                       ...s,
                       actions: {
