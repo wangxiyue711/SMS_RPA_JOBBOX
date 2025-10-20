@@ -564,8 +564,19 @@ export default function TargetSettingsPage() {
       ageRanges: typeof ageRanges;
     };
     actions: {
-      sms: { enabled: boolean; text: string };
-      mail: { enabled: boolean; subject: string; body: string };
+      sms: {
+        enabled: boolean;
+        text: string;
+        sendMode?: "immediate" | "scheduled"; // 即时/定时
+        scheduledTime?: string; // 定时发送时间 (HH:mm格式)
+      };
+      mail: {
+        enabled: boolean;
+        subject: string;
+        body: string;
+        sendMode?: "immediate" | "scheduled"; // 即时/定时
+        scheduledTime?: string; // 定时发送时间 (HH:mm格式)
+      };
     };
   };
   const [segments, setSegments] = useState<Segment[]>([]);
@@ -581,8 +592,19 @@ export default function TargetSettingsPage() {
       ageRanges: { maleMin: 18, maleMax: 99, femaleMin: 18, femaleMax: 99 },
     },
     actions: {
-      sms: { enabled: true, text: "" },
-      mail: { enabled: false, subject: "", body: "" },
+      sms: {
+        enabled: true,
+        text: "",
+        sendMode: "immediate",
+        scheduledTime: "09:00",
+      },
+      mail: {
+        enabled: false,
+        subject: "",
+        body: "",
+        sendMode: "immediate",
+        scheduledTime: "09:00",
+      },
     },
   });
 
@@ -744,16 +766,18 @@ export default function TargetSettingsPage() {
             actions: {
               sms: {
                 enabled: !!segDraft.actions.sms.enabled,
-                // for sms: replace any placeholder span (if any) with token text
                 text: segDraft.actions.sms.text,
+                sendMode: segDraft.actions.sms.sendMode || "immediate",
+                scheduledTime: segDraft.actions.sms.scheduledTime || "09:00",
               },
               mail: {
                 enabled: !!segDraft.actions.mail.enabled,
                 subject: segDraft.actions.mail.subject,
-                // serialize html body with spans -> tokens
                 body: serializePlaceholdersFromHtml(
                   segDraft.actions.mail.body || ""
                 ),
+                sendMode: segDraft.actions.mail.sendMode || "immediate",
+                scheduledTime: segDraft.actions.mail.scheduledTime || "09:00",
               },
             },
             updatedAt: serverTimestamp(),
@@ -771,6 +795,8 @@ export default function TargetSettingsPage() {
             sms: {
               enabled: !!segDraft.actions.sms.enabled,
               text: segDraft.actions.sms.text,
+              sendMode: segDraft.actions.sms.sendMode || "immediate",
+              scheduledTime: segDraft.actions.sms.scheduledTime || "09:00",
             },
             mail: {
               enabled: !!segDraft.actions.mail.enabled,
@@ -778,6 +804,8 @@ export default function TargetSettingsPage() {
               body: serializePlaceholdersFromHtml(
                 segDraft.actions.mail.body || ""
               ),
+              sendMode: segDraft.actions.mail.sendMode || "immediate",
+              scheduledTime: segDraft.actions.mail.scheduledTime || "09:00",
             },
           },
           createdAt: serverTimestamp(),
@@ -803,8 +831,19 @@ export default function TargetSettingsPage() {
           ageRanges: { maleMin: 18, maleMax: 99, femaleMin: 18, femaleMax: 99 },
         },
         actions: {
-          sms: { enabled: true, text: "" },
-          mail: { enabled: false, subject: "", body: "" },
+          sms: {
+            enabled: true,
+            text: "",
+            sendMode: "immediate",
+            scheduledTime: "09:00",
+          },
+          mail: {
+            enabled: false,
+            subject: "",
+            body: "",
+            sendMode: "immediate",
+            scheduledTime: "09:00",
+          },
         },
       });
       setSegFormOpen(false);
@@ -1225,6 +1264,110 @@ export default function TargetSettingsPage() {
               >
                 <div style={{ fontSize: 13, color: "#666" }}>SMS本文</div>
               </div>
+
+              {/* SMS 发送模式选择 */}
+              <div style={{ marginBottom: 12 }}>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: 8,
+                    fontSize: 14,
+                    color: "#333",
+                  }}
+                >
+                  SMS送信モード
+                </label>
+                <div style={{ display: "flex", gap: 16 }}>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      checked={segDraft.actions.sms.sendMode === "immediate"}
+                      onChange={() =>
+                        setSegDraft((s) => ({
+                          ...s,
+                          actions: {
+                            ...s.actions,
+                            sms: { ...s.actions.sms, sendMode: "immediate" },
+                          },
+                        }))
+                      }
+                      style={{ marginRight: 6 }}
+                    />
+                    即時送信
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      checked={segDraft.actions.sms.sendMode === "scheduled"}
+                      onChange={() =>
+                        setSegDraft((s) => ({
+                          ...s,
+                          actions: {
+                            ...s.actions,
+                            sms: { ...s.actions.sms, sendMode: "scheduled" },
+                          },
+                        }))
+                      }
+                      style={{ marginRight: 6 }}
+                    />
+                    予約送信
+                  </label>
+                </div>
+              </div>
+
+              {/* 定时发送时间选择 */}
+              {segDraft.actions.sms.sendMode === "scheduled" && (
+                <div style={{ marginBottom: 12 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: 8,
+                      fontSize: 14,
+                      color: "#333",
+                    }}
+                  >
+                    送信時刻
+                  </label>
+                  <input
+                    type="time"
+                    value={segDraft.actions.sms.scheduledTime || "09:00"}
+                    onChange={(e) =>
+                      setSegDraft((s) => ({
+                        ...s,
+                        actions: {
+                          ...s.actions,
+                          sms: {
+                            ...s.actions.sms,
+                            scheduledTime: e.target.value,
+                          },
+                        },
+                      }))
+                    }
+                    style={{
+                      padding: "8px 12px",
+                      border: "1px solid #ddd",
+                      borderRadius: 4,
+                      fontSize: 14,
+                    }}
+                  />
+                  <div style={{ marginTop: 4, fontSize: 12, color: "#666" }}>
+                    ※ 毎日この時刻に送信されます
+                  </div>
+                </div>
+              )}
+
               <textarea
                 value={segDraft.actions.sms.text}
                 onChange={(e) =>
@@ -1339,6 +1482,110 @@ export default function TargetSettingsPage() {
               >
                 <div style={{ fontSize: 13, color: "#666" }}>メール本文</div>
               </div>
+
+              {/* MAIL 发送模式选择 */}
+              <div style={{ marginBottom: 12 }}>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: 8,
+                    fontSize: 14,
+                    color: "#333",
+                  }}
+                >
+                  メール送信モード
+                </label>
+                <div style={{ display: "flex", gap: 16 }}>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      checked={segDraft.actions.mail.sendMode === "immediate"}
+                      onChange={() =>
+                        setSegDraft((s) => ({
+                          ...s,
+                          actions: {
+                            ...s.actions,
+                            mail: { ...s.actions.mail, sendMode: "immediate" },
+                          },
+                        }))
+                      }
+                      style={{ marginRight: 6 }}
+                    />
+                    即時送信
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      checked={segDraft.actions.mail.sendMode === "scheduled"}
+                      onChange={() =>
+                        setSegDraft((s) => ({
+                          ...s,
+                          actions: {
+                            ...s.actions,
+                            mail: { ...s.actions.mail, sendMode: "scheduled" },
+                          },
+                        }))
+                      }
+                      style={{ marginRight: 6 }}
+                    />
+                    予約送信
+                  </label>
+                </div>
+              </div>
+
+              {/* 定时发送时间选择 */}
+              {segDraft.actions.mail.sendMode === "scheduled" && (
+                <div style={{ marginBottom: 12 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: 8,
+                      fontSize: 14,
+                      color: "#333",
+                    }}
+                  >
+                    送信時刻
+                  </label>
+                  <input
+                    type="time"
+                    value={segDraft.actions.mail.scheduledTime || "09:00"}
+                    onChange={(e) =>
+                      setSegDraft((s) => ({
+                        ...s,
+                        actions: {
+                          ...s.actions,
+                          mail: {
+                            ...s.actions.mail,
+                            scheduledTime: e.target.value,
+                          },
+                        },
+                      }))
+                    }
+                    style={{
+                      padding: "8px 12px",
+                      border: "1px solid #ddd",
+                      borderRadius: 4,
+                      fontSize: 14,
+                    }}
+                  />
+                  <div style={{ marginTop: 4, fontSize: 12, color: "#666" }}>
+                    ※ 毎日この時刻に送信されます
+                  </div>
+                </div>
+              )}
+
               <div
                 style={{
                   display: "flex",
@@ -1647,7 +1894,7 @@ export default function TargetSettingsPage() {
 
                 {/* アクションの詳細表示 */}
                 <div style={{ fontSize: 12, color: "#666" }}>
-                  <div style={{ display: "flex", gap: 16 }}>
+                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                     {s.actions.sms.enabled && (
                       <div
                         style={{
@@ -1657,9 +1904,26 @@ export default function TargetSettingsPage() {
                           borderRadius: 12,
                           fontSize: 11,
                           fontWeight: 500,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
                         }}
                       >
                         SMS送信
+                        {s.actions.sms.sendMode === "scheduled" && (
+                          <span
+                            style={{
+                              background: "#1976d2",
+                              color: "#fff",
+                              padding: "2px 6px",
+                              borderRadius: 8,
+                              fontSize: 10,
+                              marginLeft: 4,
+                            }}
+                          >
+                            ⏰ {s.actions.sms.scheduledTime || "定時"}
+                          </span>
+                        )}
                       </div>
                     )}
                     {s.actions.mail.enabled && (
@@ -1671,9 +1935,26 @@ export default function TargetSettingsPage() {
                           borderRadius: 12,
                           fontSize: 11,
                           fontWeight: 500,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
                         }}
                       >
                         メール送信
+                        {s.actions.mail.sendMode === "scheduled" && (
+                          <span
+                            style={{
+                              background: "#7b1fa2",
+                              color: "#fff",
+                              padding: "2px 6px",
+                              borderRadius: 8,
+                              fontSize: 10,
+                              marginLeft: 4,
+                            }}
+                          >
+                            ⏰ {s.actions.mail.scheduledTime || "定時"}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>

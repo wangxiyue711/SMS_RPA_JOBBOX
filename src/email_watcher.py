@@ -2023,9 +2023,21 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         company_val = detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
                                                         # employer_name may be present from parsed email body; prefer that for publishing-company name
                                                         employer_val = detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or company_val
+                                                        # job_title fallback: prefer detail, but also fallback to info.title or parsed.job_title when available
+                                                        jt = detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle') or ''
+                                                        try:
+                                                            if not jt and 'info' in locals() and isinstance(info, dict):
+                                                                jt = info.get('title') or jt
+                                                        except Exception:
+                                                            pass
+                                                        try:
+                                                            if not jt and 'parsed' in locals() and isinstance(parsed, dict):
+                                                                jt = parsed.get('job_title') or jt
+                                                        except Exception:
+                                                            pass
                                                         sms_data = {
                                                             'applicant_name': detail.get('name'),
-                                                            'job_title': detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle'),
+                                                            'job_title': jt,
                                                             # include both company/account and employer aliases for backward compatibility
                                                             'company': company_val,
                                                             'account_name': company_val,
