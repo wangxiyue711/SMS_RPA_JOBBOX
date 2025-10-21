@@ -5,6 +5,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 import json, time, os, re, unicodedata, datetime
 from selenium.webdriver.common.keys import Keys
+from typing import Optional
 
 CONFIG_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'config', 'accounts.json'))
 
@@ -58,6 +59,56 @@ class JobboxLogin:
                 try: self.driver.switch_to.default_content()
                 except: pass
         return False
+
+    def _find_detail_panel(self, timeout=3):
+        """Locate the right-side applicant detail panel (not the main table).
+
+        Strategy:
+        - Look for elements containing '氏名' or '応募No' that are not inside a table element.
+        - Prefer visible elements.
+        Returns the WebElement of the panel or None.
+        """
+        try:
+            # XPath: element that contains '氏名' but has no ancestor table
+            xp = "//*[contains(normalize-space(.),'氏名') and not(ancestor::table)]"
+            el = WW(self.driver, timeout).until(EC.visibility_of_element_located((By.XPATH, xp)))
+            # climb up to a reasonable container (e.g. nearest ancestor div)
+            try:
+                panel = el.find_element(By.XPATH, "ancestor::div[1]")
+                return panel
+            except Exception:
+                return el
+        except Exception:
+            # fallback: try other common detail panel classes
+            tries = [
+                "//div[contains(@class,'detail') or contains(@class,'profile') or contains(@class,'drawer') or contains(@class,'side')][1]",
+            ]
+            for xp in tries:
+                try:
+                    el = WW(self.driver, timeout).until(EC.visibility_of_element_located((By.XPATH, xp)))
+                    return el
+                except Exception:
+                    continue
+        return None
+
+    def _normalize_gender(self, raw: str) -> str:
+        """Normalize gender text to '男性'/'女性'/'不明'."""
+        if not raw:
+            return '不明'
+        s = re.sub(r"\s+", '', str(raw)).lower()
+        # common Japanese words
+        if any(x in s for x in ('男性', '男')):
+            return '男性'
+        if any(x in s for x in ('女性', '女')):
+            return '女性'
+        # latin abbreviations
+        if re.match(r'^[mf]$', s):
+            return '男性' if s == 'm' else '女性'
+        if s in ('male', 'm', 'man'):
+            return '男性'
+        if s in ('female', 'f', 'woman'):
+            return '女性'
+        return '不明'
 
     def _find_main_table(self):
         tables = self.driver.find_elements(By.XPATH, "//table[.//th]")
@@ -292,7 +343,21 @@ return 'NOT_FOUND';
                         self.driver.switch_to.default_content()
                         self._wait(lambda d: d.execute_script('return document.readyState')=='complete', 20)
                         time.sleep(0.5)
-                        detail = self._collect_and_check_detail(oubo_no_norm)
+                        # Ensure document ready
+                        self._wait(lambda d: d.execute_script('return document.readyState')=='complete', 20)
+                        panel_ok = False
+                        for _ in range(16):
+                            try:
+                                # use integer timeout for the helper
+                                if self._find_detail_panel(timeout=1):
+                                    panel_ok = True
+                                    break
+                            except Exception:
+                                pass
+                            time.sleep(0.5)
+                        if not panel_ok:
+                            print("(warning) 右側の詳細パネルが指定時間内に見つかりませんでした。global fallback を使います。")
+                        detail = self._collect_and_check_detail(oubo_no_norm, kyujin_title_exact)
 
                         if detail.get("oubo_no_ok"):
                             print(f"該当する応募No.を見つけました: {oubo_no}")
@@ -315,7 +380,19 @@ return 'NOT_FOUND';
             # XPath 没命中 → 尝试 JS 兜底（结构变化时很好用）
             if self.click_name_by_title_js(kyujin_title_exact):
                 self._wait(lambda d: d.execute_script('return document.readyState')=='complete', 20)
-                detail = self._collect_and_check_detail(oubo_no_norm)
+                # Wait for detail panel to appear before collecting
+                panel_ok = False
+                for _ in range(16):
+                    try:
+                        if self._find_detail_panel(timeout=1):
+                            panel_ok = True
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(0.5)
+                if not panel_ok:
+                    print("(warning) 右側の詳細パネルが指定時間内に見つかりませんでした。global fallback を使います。")
+                detail = self._collect_and_check_detail(oubo_no_norm, kyujin_title_exact)
                 if detail.get("oubo_no_ok"):
                     print(f"該当する応募No.を見つけました: {oubo_no}")
                     return {"name": detail.get("name",""), "title": kyujin_title, "row_matched": True, "detail": detail}
@@ -329,14 +406,75 @@ return 'NOT_FOUND';
                 return None
 
     # ---------- 详情页采集 ----------
-    def _collect_and_check_detail(self, oubo_no_norm: str):
+    def _collect_and_check_detail(self, oubo_no_norm: str, expected_kyujin: Optional[str] = None):
         def pick(xps):
+            """
+            Try to extract text for the given xpaths from the right-side detail panel first.
+            If the panel isn't present or yields no results, fall back to the global
+            _wait_xpath-based search. Returns first non-empty extracted string.
+            """
+            def _extract_text_from_el(el):
+                if not el:
+                    return ''
+                try:
+                    txt = el.text.strip() if el.text else ''
+                except:
+                    txt = ''
+                if not txt:
+                    try:
+                        txt = (el.get_attribute('value') or '').strip()
+                    except:
+                        txt = ''
+                if not txt:
+                    try:
+                        txt = self.driver.execute_script("return arguments[0].innerText || arguments[0].textContent || '';", el) or ''
+                        txt = txt.strip()
+                    except:
+                        txt = ''
+                return txt
+
+            # Attempt: prefer the right-side detail panel
+            panel = None
+            try:
+                panel = self._find_detail_panel(timeout=4)
+            except Exception:
+                panel = None
+
+            if panel:
+                for xp in xps:
+                    try:
+                        # Always convert to a relative xpath when searching inside panel
+                        # to avoid matching the document root (主ページ) by absolute xpaths
+                        if xp.startswith('.'):
+                            rel_xp = xp
+                        elif xp.startswith('//') or xp.startswith('/'):
+                            rel_xp = '.' + xp
+                        else:
+                            # not starting with /, treat as descendant
+                            rel_xp = './/' + xp.lstrip('./')
+
+                        try:
+                            el = panel.find_element(By.XPATH, rel_xp)
+                        except Exception:
+                            el = None
+
+                        txt = _extract_text_from_el(el)
+                        if txt:
+                            return txt
+                    except Exception:
+                        continue
+
+            # Fallback: global search
             for xp in xps:
                 try:
-                    el = self._wait_xpath(xp, 5, visible=True)
-                    txt = el.text.strip()
-                    if txt: return txt
-                except: pass
+                    el = self._wait_xpath(xp, 3, visible=True)
+                    if not el:
+                        continue
+                    txt = _extract_text_from_el(el)
+                    if txt:
+                        return txt
+                except Exception:
+                    continue
             return ''
     
         print("\n=== 応募者情报 ===")
@@ -348,7 +486,82 @@ return 'NOT_FOUND';
             "//h1[not(contains(., '応募者一覧'))]",
             "//h2[not(contains(., '応募者一覧'))]"
         ])
-        gender = pick(["//*[contains(.,'性別')]/following::*[1]"])
+        # Prefer strict selectors for 性別 first (th/td, dt/dd, sibling) and prefer short text nodes
+        gender = pick([
+            "//th[normalize-space(.)='性別']/following-sibling::td[1][string-length(normalize-space(.))<30]",
+            "//dt[normalize-space(.)='性別']/following-sibling::dd[1][string-length(normalize-space(.))<30]",
+            "//*[normalize-space(text())='性別']/following-sibling::*[normalize-space(.)!='' and string-length(normalize-space(.))<30][1]",
+            # general fallback but prefer short nodes to avoid memo blocks
+            "//*[contains(normalize-space(.),'性別')]/following::*[normalize-space(.)!='' and string-length(normalize-space(.))<30][1]",
+        ])
+
+        raw_gender = gender or ''
+        try:
+            # First try normalize on the primary extraction
+            gender_norm = self._normalize_gender(raw_gender)
+            if gender_norm != '不明':
+                gender = gender_norm
+            else:
+                # If initial extraction returned a very long value (likely a memos block),
+                # try a panel-local short-node search directly to pick tokens like '男性'/'女性'.
+                panel = None
+                try:
+                    panel = self._find_detail_panel(timeout=1)
+                except Exception:
+                    panel = None
+
+                # Attempt a targeted short-node search inside the panel for small values
+                if panel and (not raw_gender or len(raw_gender) > 40 or raw_gender.count('\n') > 2):
+                    try:
+                        el = panel.find_element(By.XPATH, ".//*[contains(normalize-space(.),'性別')]/following::*[normalize-space(.)!='' and string-length(normalize-space(.))<20][1]")
+                        if el:
+                            candidate = (el.text or '').strip()
+                            if candidate:
+                                found = candidate
+                            else:
+                                found = ''
+                        else:
+                            found = ''
+                    except Exception:
+                        found = ''
+                else:
+                    found = ''
+                # Fallback: search inside the detail panel for short exact tokens like '男性'/'女性' etc.
+                panel = None
+                try:
+                    panel = self._find_detail_panel(timeout=1)
+                except Exception:
+                    panel = None
+
+                found = ''
+                if panel:
+                    tokens = ['男性','女性','男','女','M','F','m','f','male','female']
+                    for t in tokens:
+                        try:
+                            # use a relative xpath inside panel to find exact-token nodes
+                            els = panel.find_elements(By.XPATH, f".//*[normalize-space(.)={self._xpath_literal(t)}]")
+                            for el in els:
+                                try:
+                                    if not el.is_displayed():
+                                        continue
+                                    txt = (el.text or '').strip()
+                                    if txt:
+                                        found = txt
+                                        break
+                                except:
+                                    continue
+                            if found:
+                                break
+                        except:
+                            continue
+
+                if found:
+                    gender = self._normalize_gender(found)
+                else:
+                    gender = '不明'
+                    print(f"(warning) 性別未能从 panel 明确解析，初始 raw='{(raw_gender or '')[:160].replace('\n',' ')}' -> '{gender}'")
+        except Exception:
+            gender = '不明'
         birth  = pick(["//*[contains(.,'生年月日')]/following::*[1]"])
         email  = pick(["//*[contains(.,'メールアドレス')]/following::*[1]"])
         tel    = pick(["//*[contains(.,'電話')]/following::*[1]"])
@@ -356,6 +569,9 @@ return 'NOT_FOUND';
         school = pick(["//*[contains(.,'学校') or contains(.,'学歴')]/following::*[1]"])
         oubo_dt= pick(["//*[contains(.,'応募日') or contains(.,'応募日時')]/following::*[1]"])
         kyujin = pick(["//*[contains(.,'応募求人')]/following::*[1]"])
+        # 如果调用者传入了预期的求人标题，优先使用它以提高匹配准确性
+        if expected_kyujin:
+            kyujin = expected_kyujin
         oubo_no_val = pick([
             "//*[self::td or self::th][contains(.,'応募No')]/following-sibling::*[1]",
             "//*[contains(.,'応募No')]/following::*[1]",
@@ -398,39 +614,256 @@ return 'NOT_FOUND';
         try:
             print("=== 勤務先名を取得中 ===")
             
-            # 応募求人のリンクを検索
-            # 画像によると、このリンクは通常応募求人フィールドの近くにあり、kyujinと同じテキストを含む
-            job_link_selectors = [
-                # 応募求人エリアのリンクを検索
-                f"//a[contains(text(), '{kyujin}') and contains(@href, '/')]" if kyujin else None,
-                "//a[contains(@class, 'job') or contains(@class, 'kyujin')]",
-                "//*[contains(.,'応募求人')]/following-sibling::*//a",
-                "//*[contains(.,'応募求人')]/following::a[1]",
-                # 求人タイトルを含む青いリンクを検索
-                "//a[contains(@style, 'color') or contains(@class, 'blue') or contains(@class, 'link')]"
-            ]
-            
+            # 直接查找応募求人字段中的职位链接（针对截图中粉色圆圈标记的位置）
             job_link = None
-            for selector in job_link_selectors:
-                if not selector:
-                    continue
-                try:
-                    links = self.driver.find_elements(By.XPATH, selector)
-                    for link in links:
-                        if link.is_displayed() and link.is_enabled():
-                            link_text = link.text.strip()
-                            # リンクテキストが求人情報を含むか、有効なリンクかチェック
-                            if link_text and (len(link_text) > 5 or kyujin in link_text):
-                                job_link = link
-                                print(f"応募求人リンクが見つかりました: {link_text}")
-                                break
-                    if job_link:
-                        break
-                except Exception as e:
-                    continue
+            exclude_keywords = ['求人ボックス', '採用ボード', '採用ボードへ', '公開中のページ']
+            
+            # 关键改进：先确定当前求职者的主要信息容器（包含氏名的区域），只在该区域内查找応募求人链接
+            main_container = None
+            try:
+                # 尝试定位包含当前求职者氏名信息的主容器
+                # 优先查找包含"氏名"标签的最近祖先容器（通常是 div、section、main 等）
+                name_labels = self.driver.find_elements(By.XPATH, "//th[normalize-space(.)='氏名'] | //dt[normalize-space(.)='氏名'] | //label[contains(., '氏名')]")
+                for nl in name_labels:
+                    try:
+                        # 查找最近的有意义的容器（div/section/main/article）
+                        for tag in ('main', 'section', 'article', 'div'):
+                            try:
+                                container = nl.find_element(By.XPATH, f"./ancestor::{tag}[contains(@class, 'detail') or contains(@class, 'profile') or contains(@class, 'info') or contains(@class, 'content')][1]")
+                                if container:
+                                    main_container = container
+                                    break
+                            except: pass
+                        
+                        # 如果没有找到带特定class的容器，尝试更通用的祖先容器
+                        if not main_container:
+                            try:
+                                for tag in ('main', 'section', 'article'):
+                                    try:
+                                        container = nl.find_element(By.XPATH, f"./ancestor::{tag}[1]")
+                                        if container:
+                                            main_container = container
+                                            break
+                                    except: pass
+                            except: pass
+                        
+                        if main_container:
+                            break
+                    except: continue
+            except Exception as e:
+                print(f"主要コンテナ検出エラー: {e}")
+            
+            # 如果找到主容器，只在该容器内查找；否则使用全局选择器但更严格
+            search_prefix = ".//" if main_container else "//"
+            
+            # 专门查找応募求人标签右侧的职位内容区域
+            try:
+                # 方法1: 查找応募求人标签，然后在其后的内容中查找链接
+                oubo_kyujin_selectors = [
+                    # 查找応募求人标签后的内容区域中的链接（优先使用dt/dd结构）
+                    f"{search_prefix}dt[contains(normalize-space(.), '応募求人')]/following-sibling::dd[1]//a[@href]",
+                    f"{search_prefix}th[contains(normalize-space(.), '応募求人')]/following-sibling::td[1]//a[@href]",
+                    f"{search_prefix}td[contains(normalize-space(.), '応募求人')]/following-sibling::td[1]//a[@href]",
+                    # 更宽泛的查找，在応募求人后的元素中查找
+                    f"{search_prefix}*[contains(normalize-space(.), '応募求人')]/following-sibling::*[1]//a[@href]",
+                ]
+                
+                for selector in oubo_kyujin_selectors:
+                    try:
+                        # 如果有主容器，在容器内查找；否则全局查找
+                        if main_container:
+                            links = main_container.find_elements(By.XPATH, selector)
+                        else:
+                            links = self.driver.find_elements(By.XPATH, selector)
+                        
+                        for link in links:
+                            if not link.is_displayed() or not link.is_enabled():
+                                continue
+                            
+                            link_text = (link.text or '').strip()
+                            href = (link.get_attribute('href') or '')
+                            
+                            # 跳过黑名单关键词
+                            if any(k in link_text for k in exclude_keywords):
+                                print(f"スキップ(黒名单): {link_text[:50]}")
+                                continue
+                            
+                            # 跳过空链接或无效链接
+                            if not link_text or len(link_text) < 3:
+                                continue
+                            
+                            # 额外验证：确保链接在当前可见区域内（避免点到隐藏的或页面外的链接）
+                            try:
+                                location = link.location
+                                size = link.size
+                                if location['y'] < 0 or size['height'] == 0:
+                                    print(f"スキップ(非表示): {link_text[:50]}")
+                                    continue
+                            except: pass
+                            
+                            # 【关键改进】如果有kyujin参数，必须完全匹配或高度相似才接受
+                            if kyujin:
+                                # 归一化比较（移除空白）
+                                kyujin_norm = self._norm(kyujin)
+                                link_norm = self._norm(link_text)
+                                
+                                # 完全匹配
+                                if kyujin_norm == link_norm:
+                                    job_link = link
+                                    print(f"✓ 応募求人リンクが見つかりました (完全一致): {link_text[:50]}")
+                                    break
+                                
+                                # 高相似度匹配：kyujin包含在link中或link包含在kyujin中
+                                elif kyujin_norm in link_norm or link_norm in kyujin_norm:
+                                    # 进一步验证：相似度要足够高（长度差不超过20%）
+                                    len_diff = abs(len(kyujin_norm) - len(link_norm))
+                                    max_len = max(len(kyujin_norm), len(link_norm))
+                                    if max_len > 0 and len_diff / max_len <= 0.2:
+                                        job_link = link
+                                        print(f"✓ 応募求人リンクが見つかりました (高相似): {link_text[:50]}")
+                                        break
+                                    else:
+                                        continue
+                                else:
+                                    # 不匹配，跳过
+                                    continue
+                            else:
+                                # 没有kyujin参数时才使用宽松匹配
+                                if '/job' in href or '/jobs' in href or '求人' in href:
+                                    job_link = link
+                                    print(f"応募求人リンクが見つかりました (URL匹配): {link_text[:50]}")
+                                    break
+                                elif len(link_text) > 10 and href and 'http' in href:
+                                    if '一覧' not in link_text and 'メニュー' not in link_text and 'ナビ' not in link_text:
+                                        job_link = link
+                                        print(f"応募求人リンクが見つかりました (一般链接): {link_text[:50]}")
+                                        break
+                        
+                        if job_link:
+                            break
+                    except Exception as e:
+                        print(f"応募求人セレクター試行エラー: {selector} - {e}")
+                        continue
+                
+                # 方法2: 如果上述方法没找到，尝试在主容器范围内查找包含応募求人的局部容器
+                if not job_link and main_container:
+                    try:
+                        # 在主容器内查找包含応募求人文本的元素
+                        oubo_elements = main_container.find_elements(By.XPATH, ".//*[contains(normalize-space(.), '応募求人')]")
+                        for oubo_elem in oubo_elements:
+                            try:
+                                # 在该元素的父级或兄弟元素中查找链接
+                                parent = oubo_elem.find_element(By.XPATH, "./parent::*")
+                                links = parent.find_elements(By.XPATH, ".//a[@href]")
+                                
+                                for link in links:
+                                    if not link.is_displayed() or not link.is_enabled():
+                                        continue
+                                    
+                                    link_text = (link.text or '').strip()
+                                    href = (link.get_attribute('href') or '')
+                                    
+                                    # 跳过黑名单关键词和応募求人自身的链接
+                                    if any(k in link_text for k in exclude_keywords):
+                                        continue
+                                    if '応募求人' in link_text:
+                                        continue
+                                    
+                                    # 查找实际的职位内容链接
+                                    if link_text and len(link_text) > 5:
+                                        # 【严格匹配kyujin】
+                                        if kyujin:
+                                            kyujin_norm = self._norm(kyujin)
+                                            link_norm = self._norm(link_text)
+                                            
+                                            # 完全匹配
+                                            if kyujin_norm == link_norm:
+                                                job_link = link
+                                                print(f"✓ 応募求人リンクが見つかりました (コンテナ内完全一致): {link_text[:50]}")
+                                                break
+                                            # 高相似度匹配
+                                            elif kyujin_norm in link_norm or link_norm in kyujin_norm:
+                                                len_diff = abs(len(kyujin_norm) - len(link_norm))
+                                                max_len = max(len(kyujin_norm), len(link_norm))
+                                                if max_len > 0 and len_diff / max_len <= 0.2:
+                                                    job_link = link
+                                                    print(f"✓ 応募求人リンクが見つかりました (コンテナ内高相似): {link_text[:50]}")
+                                                    break
+                                        else:
+                                            # 没有kyujin时才使用宽松匹配
+                                            if len(link_text) > 15 and href and 'http' in href:
+                                                if '一覧' not in link_text:
+                                                    job_link = link
+                                                    print(f"応募求人リンクが見つかりました (コンテナ内一般): {link_text[:50]}")
+                                                    break
+                                
+                                if job_link:
+                                    break
+                            except: continue
+                    except Exception as e:
+                        print(f"コンテナ内検索エラー: {e}")
+                
+                # 方法3: 如果仍未找到且没有主容器限制，作为最后手段全局搜索（但更严格过滤）
+                if not job_link and not main_container:
+                    try:
+                        # 查找包含応募求人文本的容器元素
+                        containers = self.driver.find_elements(By.XPATH, "//*[contains(normalize-space(.), '応募求人')]")
+                        for container in containers:
+                            try:
+                                # 在该容器的父级或兄弟元素中查找链接
+                                parent = container.find_element(By.XPATH, "./parent::*")
+                                links = parent.find_elements(By.XPATH, ".//a[@href]")
+                                
+                                for link in links:
+                                    if not link.is_displayed() or not link.is_enabled():
+                                        continue
+                                    
+                                    link_text = (link.text or '').strip()
+                                    href = (link.get_attribute('href') or '')
+                                    
+                                    # 跳过黑名单关键词和応募求人自身的链接
+                                    if any(k in link_text for k in exclude_keywords):
+                                        continue
+                                    if '応募求人' in link_text:
+                                        continue
+                                    
+                                    # 查找实际的职位内容链接
+                                    if link_text and len(link_text) > 5:
+                                        # 【严格匹配kyujin】
+                                        if kyujin:
+                                            kyujin_norm = self._norm(kyujin)
+                                            link_norm = self._norm(link_text)
+                                            
+                                            # 完全匹配
+                                            if kyujin_norm == link_norm:
+                                                job_link = link
+                                                print(f"✓ 応募求人リンクが見つかりました (全局完全一致): {link_text[:50]}")
+                                                break
+                                            # 高相似度匹配
+                                            elif kyujin_norm in link_norm or link_norm in kyujin_norm:
+                                                len_diff = abs(len(kyujin_norm) - len(link_norm))
+                                                max_len = max(len(kyujin_norm), len(link_norm))
+                                                if max_len > 0 and len_diff / max_len <= 0.2:
+                                                    job_link = link
+                                                    print(f"✓ 応募求人リンクが見つかりました (全局高相似): {link_text[:50]}")
+                                                    break
+                                        else:
+                                            # 没有kyujin时才使用宽松匹配
+                                            if len(link_text) > 15 and href and 'http' in href:
+                                                if '一覧' not in link_text:
+                                                    job_link = link
+                                                    print(f"応募求人リンクが見つかりました (全局一般): {link_text[:50]}")
+                                                    break
+                                
+                                if job_link:
+                                    break
+                            except: continue
+                    except: pass
+            except Exception as e:
+                print(f"応募求人リンク検索エラー: {e}")
             
             if job_link:
-                # リンクをクリックして職位詳細ページに移動
+                # 点击链接进入职位详细页面
                 self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", job_link)
                 try:
                     job_link.click()
