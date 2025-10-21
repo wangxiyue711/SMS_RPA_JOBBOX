@@ -567,15 +567,17 @@ export default function TargetSettingsPage() {
       sms: {
         enabled: boolean;
         text: string;
-        sendMode?: "immediate" | "scheduled"; // 即时/定时
+        sendMode?: "immediate" | "scheduled" | "delayed"; // 即时/定时/预约
         scheduledTime?: string; // 定时发送时间 (HH:mm格式)
+        delayMinutes?: number; // 预约发送延迟分钟数
       };
       mail: {
         enabled: boolean;
         subject: string;
         body: string;
-        sendMode?: "immediate" | "scheduled"; // 即时/定时
+        sendMode?: "immediate" | "scheduled" | "delayed"; // 即时/定时/预约
         scheduledTime?: string; // 定时发送时间 (HH:mm格式)
+        delayMinutes?: number; // 预约发送延迟分钟数
       };
     };
   };
@@ -597,6 +599,7 @@ export default function TargetSettingsPage() {
         text: "",
         sendMode: "immediate",
         scheduledTime: "09:00",
+        delayMinutes: 30,
       },
       mail: {
         enabled: false,
@@ -604,6 +607,7 @@ export default function TargetSettingsPage() {
         body: "",
         sendMode: "immediate",
         scheduledTime: "09:00",
+        delayMinutes: 30,
       },
     },
   });
@@ -769,6 +773,7 @@ export default function TargetSettingsPage() {
                 text: segDraft.actions.sms.text,
                 sendMode: segDraft.actions.sms.sendMode || "immediate",
                 scheduledTime: segDraft.actions.sms.scheduledTime || "09:00",
+                delayMinutes: segDraft.actions.sms.delayMinutes || 30,
               },
               mail: {
                 enabled: !!segDraft.actions.mail.enabled,
@@ -778,6 +783,7 @@ export default function TargetSettingsPage() {
                 ),
                 sendMode: segDraft.actions.mail.sendMode || "immediate",
                 scheduledTime: segDraft.actions.mail.scheduledTime || "09:00",
+                delayMinutes: segDraft.actions.mail.delayMinutes || 30,
               },
             },
             updatedAt: serverTimestamp(),
@@ -797,6 +803,7 @@ export default function TargetSettingsPage() {
               text: segDraft.actions.sms.text,
               sendMode: segDraft.actions.sms.sendMode || "immediate",
               scheduledTime: segDraft.actions.sms.scheduledTime || "09:00",
+              delayMinutes: segDraft.actions.sms.delayMinutes || 30,
             },
             mail: {
               enabled: !!segDraft.actions.mail.enabled,
@@ -806,6 +813,7 @@ export default function TargetSettingsPage() {
               ),
               sendMode: segDraft.actions.mail.sendMode || "immediate",
               scheduledTime: segDraft.actions.mail.scheduledTime || "09:00",
+              delayMinutes: segDraft.actions.mail.delayMinutes || 30,
             },
           },
           createdAt: serverTimestamp(),
@@ -899,6 +907,19 @@ export default function TargetSettingsPage() {
       }
     } catch (e) {
       // ignore
+    }
+    // Ensure delayMinutes has a default value if not present
+    if (
+      converted.actions?.sms &&
+      converted.actions.sms.delayMinutes === undefined
+    ) {
+      converted.actions.sms.delayMinutes = 30;
+    }
+    if (
+      converted.actions?.mail &&
+      converted.actions.mail.delayMinutes === undefined
+    ) {
+      converted.actions.mail.delayMinutes = 30;
     }
     setSegDraft({ ...converted });
     setSegFormOpen(true);
@@ -1322,6 +1343,29 @@ export default function TargetSettingsPage() {
                       }
                       style={{ marginRight: 6 }}
                     />
+                    時刻送信
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      checked={segDraft.actions.sms.sendMode === "delayed"}
+                      onChange={() =>
+                        setSegDraft((s) => ({
+                          ...s,
+                          actions: {
+                            ...s.actions,
+                            sms: { ...s.actions.sms, sendMode: "delayed" },
+                          },
+                        }))
+                      }
+                      style={{ marginRight: 6 }}
+                    />
                     予約送信
                   </label>
                 </div>
@@ -1365,6 +1409,50 @@ export default function TargetSettingsPage() {
                   <div style={{ marginTop: 4, fontSize: 12, color: "#666" }}>
                     ※ 毎日この時刻に送信されます
                   </div>
+                </div>
+              )}
+
+              {/* 预约发送延迟分钟数选择 */}
+              {segDraft.actions.sms.sendMode === "delayed" && (
+                <div style={{ marginBottom: 12 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: 8,
+                      fontSize: 14,
+                      color: "#333",
+                    }}
+                  >
+                    送信までの時間（分）
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="1440"
+                    value={segDraft.actions.sms.delayMinutes || 30}
+                    onChange={(e) =>
+                      setSegDraft((s) => ({
+                        ...s,
+                        actions: {
+                          ...s.actions,
+                          sms: {
+                            ...s.actions.sms,
+                            delayMinutes: parseInt(e.target.value) || 30,
+                          },
+                        },
+                      }))
+                    }
+                    style={{
+                      padding: "8px 12px",
+                      border: "1px solid #ddd",
+                      borderRadius: 4,
+                      fontSize: 14,
+                      width: "120px",
+                    }}
+                  />
+                  <span style={{ marginLeft: 8, fontSize: 14, color: "#666" }}>
+                    分後
+                  </span>
                 </div>
               )}
 
@@ -1540,6 +1628,29 @@ export default function TargetSettingsPage() {
                       }
                       style={{ marginRight: 6 }}
                     />
+                    時刻送信
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      checked={segDraft.actions.mail.sendMode === "delayed"}
+                      onChange={() =>
+                        setSegDraft((s) => ({
+                          ...s,
+                          actions: {
+                            ...s.actions,
+                            mail: { ...s.actions.mail, sendMode: "delayed" },
+                          },
+                        }))
+                      }
+                      style={{ marginRight: 6 }}
+                    />
                     予約送信
                   </label>
                 </div>
@@ -1583,6 +1694,50 @@ export default function TargetSettingsPage() {
                   <div style={{ marginTop: 4, fontSize: 12, color: "#666" }}>
                     ※ 毎日この時刻に送信されます
                   </div>
+                </div>
+              )}
+
+              {/* MAIL预约发送延迟分钟数选择 */}
+              {segDraft.actions.mail.sendMode === "delayed" && (
+                <div style={{ marginBottom: 12 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: 8,
+                      fontSize: 14,
+                      color: "#333",
+                    }}
+                  >
+                    送信までの時間（分）
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="1440"
+                    value={segDraft.actions.mail.delayMinutes || 30}
+                    onChange={(e) =>
+                      setSegDraft((s) => ({
+                        ...s,
+                        actions: {
+                          ...s.actions,
+                          mail: {
+                            ...s.actions.mail,
+                            delayMinutes: parseInt(e.target.value) || 30,
+                          },
+                        },
+                      }))
+                    }
+                    style={{
+                      padding: "8px 12px",
+                      border: "1px solid #ddd",
+                      borderRadius: 4,
+                      fontSize: 14,
+                      width: "120px",
+                    }}
+                  />
+                  <span style={{ marginLeft: 8, fontSize: 14, color: "#666" }}>
+                    分後
+                  </span>
                 </div>
               )}
 
@@ -1924,6 +2079,20 @@ export default function TargetSettingsPage() {
                             ⏰ {s.actions.sms.scheduledTime || "定時"}
                           </span>
                         )}
+                        {s.actions.sms.sendMode === "delayed" && (
+                          <span
+                            style={{
+                              background: "#ff9800",
+                              color: "#fff",
+                              padding: "2px 6px",
+                              borderRadius: 8,
+                              fontSize: 10,
+                              marginLeft: 4,
+                            }}
+                          >
+                            ⏱ {s.actions.sms.delayMinutes || 30}分後
+                          </span>
+                        )}
                       </div>
                     )}
                     {s.actions.mail.enabled && (
@@ -1953,6 +2122,20 @@ export default function TargetSettingsPage() {
                             }}
                           >
                             ⏰ {s.actions.mail.scheduledTime || "定時"}
+                          </span>
+                        )}
+                        {s.actions.mail.sendMode === "delayed" && (
+                          <span
+                            style={{
+                              background: "#ff9800",
+                              color: "#fff",
+                              padding: "2px 6px",
+                              borderRadius: 8,
+                              fontSize: 10,
+                              marginLeft: 4,
+                            }}
+                          >
+                            ⏱ {s.actions.mail.delayMinutes || 30}分後
                           </span>
                         )}
                       </div>
