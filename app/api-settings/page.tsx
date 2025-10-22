@@ -137,116 +137,77 @@ export default function ApiSettingsPage() {
           </select>
         </div>
       </div>
-      <p style={{ marginBottom: 16 }}>
+      <p style={{ marginBottom: 24 }}>
         外部APIのURLとトークンを設定 / 管理することができます。
       </p>
 
-      <form onSubmit={handleSave} autoComplete="off">
-        {/* Hidden autofill trap inputs: helps prevent browser from filling real fields */}
-        <input
-          style={{
-            position: "absolute",
-            left: -9999,
-            top: "auto",
-            width: 1,
-            height: 1,
-            opacity: 0,
-          }}
-          tabIndex={-1}
-          aria-hidden="true"
-          autoComplete="username"
-          name="fakeuser_user"
-        />
-        <input
-          style={{
-            position: "absolute",
-            left: -9999,
-            top: "auto",
-            width: 1,
-            height: 1,
-            opacity: 0,
-          }}
-          tabIndex={-1}
-          aria-hidden="true"
-          autoComplete="new-password"
-          name="fakeuser_pass"
-        />
+      {/* White card container to match rpa-settings/mail-settings */}
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid rgba(48, 48, 48, 0.08)",
+          borderRadius: 12,
+          padding: 24,
+          marginBottom: 32,
+        }}
+      >
+        <form onSubmit={handleSave} autoComplete="off">
+          {/* Hidden autofill trap inputs: helps prevent browser from filling real fields */}
+          <input
+            style={{
+              position: "absolute",
+              left: -9999,
+              top: "auto",
+              width: 1,
+              height: 1,
+              opacity: 0,
+            }}
+            tabIndex={-1}
+            aria-hidden="true"
+            autoComplete="username"
+            name="fakeuser_user"
+          />
+          <input
+            style={{
+              position: "absolute",
+              left: -9999,
+              top: "auto",
+              width: 1,
+              height: 1,
+              opacity: 0,
+            }}
+            tabIndex={-1}
+            aria-hidden="true"
+            autoComplete="new-password"
+            name="fakeuser_pass"
+          />
 
-        <div style={{ marginBottom: 12 }}>
-          <label>APIベースURL</label>
-          <div className="field-tooltip-wrapper">
-            <input
-              name="api_base_url"
-              autoComplete="off"
-              value={baseUrl}
-              onChange={(e) => {
-                setBaseUrl(e.target.value);
-                if (fieldError && fieldError.field === "baseUrl")
-                  setFieldError(null);
+          <div style={{ marginBottom: 12 }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: 6,
+                fontSize: 14,
+                fontWeight: 500,
               }}
-              placeholder="https://api……"
-              style={{ width: "100%", boxSizing: "border-box", marginTop: 6 }}
-            />
-            {fieldError && fieldError.field === "baseUrl" && (
-              <div className="field-tooltip-bubble" aria-hidden>
-                <div className="field-tooltip-box">
-                  <div className="field-tooltip-icon">!</div>
-                  <div>{fieldError.msg}</div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <label>API ID</label>
-          <div className="field-tooltip-wrapper">
-            <input
-              name="api_id"
-              autoComplete="username"
-              value={apiId}
-              onChange={(e) => {
-                setApiId(e.target.value);
-                if (fieldError && fieldError.field === "apiId")
-                  setFieldError(null);
-              }}
-              placeholder="sm000……"
-              style={{ width: "100%", boxSizing: "border-box", marginTop: 6 }}
-            />
-            {fieldError && fieldError.field === "apiId" && (
-              <div className="field-tooltip-bubble" aria-hidden>
-                <div className="field-tooltip-box">
-                  <div className="field-tooltip-icon">!</div>
-                  <div>{fieldError.msg}</div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <label>APIパスワード</label>
-          <div style={{ position: "relative" }}>
+            >
+              APIベースURL
+            </label>
             <div className="field-tooltip-wrapper">
               <input
-                name="api_password"
-                autoComplete="new-password"
-                type={showPass ? "text" : "password"}
-                value={apiPass}
+                name="api_base_url"
+                autoComplete="off"
+                value={baseUrl}
                 onChange={(e) => {
-                  setApiPass(e.target.value);
-                  if (fieldError && fieldError.field === "apiPass")
+                  setBaseUrl(e.target.value);
+                  if (fieldError && fieldError.field === "baseUrl")
                     setFieldError(null);
                 }}
-                placeholder="samplepassword"
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  marginTop: 6,
-                  paddingRight: 44,
-                }}
+                placeholder="https://api……"
+                className="input"
+                style={{ width: "100%", boxSizing: "border-box" }}
               />
-              {fieldError && fieldError.field === "apiPass" && (
+              {fieldError && fieldError.field === "baseUrl" && (
                 <div className="field-tooltip-bubble" aria-hidden>
                   <div className="field-tooltip-box">
                     <div className="field-tooltip-icon">!</div>
@@ -255,106 +216,140 @@ export default function ApiSettingsPage() {
                 </div>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => setShowPass((s) => !s)}
-              aria-label={showPass ? "隠す" : "表示"}
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label
               style={{
-                position: "absolute",
-                right: 6,
-                top: "50%",
-                transform: "translateY(-50%)",
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                padding: 6,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 28,
-                height: 28,
+                display: "block",
+                marginBottom: 6,
+                fontSize: 14,
+                fontWeight: 500,
               }}
             >
-              {showPass ? (
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  aria-hidden
-                >
-                  <path
-                    d="M3 3L21 21"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M10.58 10.58A3 3 0 0113.42 13.42"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M9.88 5.41A11 11 0 0121 12c-2 3.5-5.5 6-9 6a9.98 9.98 0 01-6.39-2.22"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  aria-hidden
-                >
-                  <path
-                    d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="3"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+              API ID
+            </label>
+            <div className="field-tooltip-wrapper">
+              <input
+                name="api_id"
+                autoComplete="username"
+                value={apiId}
+                onChange={(e) => {
+                  setApiId(e.target.value);
+                  if (fieldError && fieldError.field === "apiId")
+                    setFieldError(null);
+                }}
+                placeholder="sm000……"
+                className="input"
+                style={{ width: "100%", boxSizing: "border-box" }}
+              />
+              {fieldError && fieldError.field === "apiId" && (
+                <div className="field-tooltip-bubble" aria-hidden>
+                  <div className="field-tooltip-box">
+                    <div className="field-tooltip-icon">!</div>
+                    <div>{fieldError.msg}</div>
+                  </div>
+                </div>
               )}
-            </button>
+            </div>
           </div>
-        </div>
 
-        <button className="btn" type="submit" disabled={loading}>
-          {loading ? "保存中..." : "保存"}
-        </button>
-        {error && <div style={{ color: "#ff0000", marginTop: 8 }}>{error}</div>}
-        {saved && (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              color: "#28a745",
-              marginTop: 8,
-              fontWeight: 700,
-            }}
-          >
-            ✅ 保存しました！
+          <div style={{ marginBottom: 12 }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: 6,
+                fontSize: 14,
+                fontWeight: 500,
+              }}
+            >
+              APIパスワード
+            </label>
+            <div className="input-with-icon">
+              <div className="field-tooltip-wrapper" style={{ width: "100%" }}>
+                <input
+                  name="api_password"
+                  autoComplete="new-password"
+                  type={showPass ? "text" : "password"}
+                  value={apiPass}
+                  onChange={(e) => {
+                    setApiPass(e.target.value);
+                    if (fieldError && fieldError.field === "apiPass")
+                      setFieldError(null);
+                  }}
+                  placeholder="samplepassword"
+                  className="input"
+                  style={{ width: "100%", boxSizing: "border-box" }}
+                />
+                {fieldError && fieldError.field === "apiPass" && (
+                  <div className="field-tooltip-bubble" aria-hidden>
+                    <div className="field-tooltip-box">
+                      <div className="field-tooltip-icon">!</div>
+                      <div>{fieldError.msg}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPass((s) => !s)}
+                aria-label={showPass ? "隠す" : "表示"}
+                className="password-toggle"
+              >
+                {showPass ? (
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-5 0-9.27-3-11-7 1.11-2.45 2.98-4.44 5.23-5.66" />
+                    <path d="M1 1l22 22" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
-        )}
-      </form>
+
+          <button className="btn" type="submit" disabled={loading}>
+            {loading ? "保存中..." : "保存"}
+          </button>
+          {error && (
+            <div style={{ color: "#ff0000", marginTop: 8 }}>{error}</div>
+          )}
+          {saved && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                color: "#28a745",
+                marginTop: 8,
+                fontWeight: 700,
+              }}
+            >
+              ✅ 保存しました！
+            </div>
+          )}
+        </form>
+      </div>
     </div>
   );
 }

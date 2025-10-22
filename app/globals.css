@@ -330,10 +330,11 @@ main {
 
 /* Saved accounts list: limit to ~3 rows and enable vertical scroll */
 .saved-list {
-  max-height: calc(3 * 56px); /* approximate 3 rows at 56px each */
-  overflow-y: auto;
+  /* Show all saved items without collapsing to 3 rows */
+  max-height: none;
+  overflow: visible;
   display: block;
-  padding-right: 8px; /* allow for scrollbar space */
+  padding-right: 0;
 }
 .link {
   display: inline-block;
