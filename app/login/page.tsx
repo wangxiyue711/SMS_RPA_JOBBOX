@@ -80,7 +80,13 @@ export default function LoginPage() {
   return (
     <div className="center">
       <div className="card">
-        <h1 className="title">RPA_SMS & JOBBOX /// LOGIN</h1>
+        {/* 只保留美化后的品牌区块 */}
+        <div className="brand-block">
+          <h1 className="title">
+            RoMe<span className="title-accent">ALL</span>
+          </h1>
+          <p className="subtitle">The robot works for me on all tasks.</p>
+        </div>
 
         <form onSubmit={handleLogin}>
           <div className="field-row">

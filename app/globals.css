@@ -1,3 +1,41 @@
+.brand-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1rem; /* give more space below brand block */
+  gap: 2px; /* tighter stacking between title and subtitle */
+}
+.title {
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-align: center;
+  margin: 0; /* remove default heading margins */
+  line-height: 1.02; /* tighten line height */
+  font-family: "Inter", "Segoe UI", Arial, sans-serif;
+  background: linear-gradient(90deg, #222 0%, #555 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-fill-color: transparent;
+}
+.title-accent {
+  background: linear-gradient(90deg, #00c6ff 0%, #7b61ff 100%);
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.subtitle {
+  font-size: 0.95rem;
+  color: #aeb1b4;
+  text-align: center;
+  margin: 0 0 0.8rem 0; /* bottom spacing to separate from form */
+  margin-top: 0px;
+  line-height: 1; /* keep compact baseline */
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  font-family: "Inter", "Segoe UI", Arial, sans-serif;
+}
+/* (subtitle styles consolidated above) */
 :root {
   /* Grayscale palette provided */
   --shade-1: #000000;
@@ -552,6 +590,74 @@ main {
   max-width: 1200px;
   margin: 0 auto;
 }
+
+/* Site header used by Header.tsx - ensures consistent height and vertical alignment */
+.site-header {
+  padding: 6px 28px; /* slightly tighter vertical padding */
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  height: 64px; /* fixed header height to align with page elements */
+  box-sizing: border-box;
+}
+
+.site-header .header-inner {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: none !important; /* allow full-width stretching */
+  margin: 0 !important;
+}
+
+/* compact header brand to align visually with form inputs */
+.header-brand .title {
+  font-size: 1rem !important;
+  line-height: 1;
+  margin: 0;
+}
+
+#user-email {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* Compact brand block like sample: small mark + large acronym + small subtitle */
+.brand-compact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand-mark {
+  width: 6px;
+  height: 36px;
+  border-radius: 4px;
+  /* use same gradient colors as the ALL accent for brand consistency */
+  background: linear-gradient(180deg, #00c6ff 0%, #7b61ff 100%);
+  flex-shrink: 0;
+}
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+.brand-acronym {
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: var(--shade-2);
+  letter-spacing: 0.02em;
+}
+.brand-acronym .title-accent {
+  background: linear-gradient(90deg, #00c6ff 0%, #7b61ff 100%);
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.brand-sub {
+  font-size: 0.78rem;
+  color: #8f9396;
+  margin-top: 2px;
+}
 .brand {
   display: flex;
   align-items: center;
@@ -572,6 +678,21 @@ main {
   font-weight: 700;
   font-size: 16px;
 }
+
+/* Header-specific brand sizing (uses same title/accent styles but compact) */
+.header-brand .title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  margin: 0;
+  line-height: 1;
+  /* make base text regular color and let .title-accent keep the gradient */
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: initial !important;
+  background-clip: initial !important;
+  color: var(--shade-2) !important;
+}
+
 .user-area {
   display: flex;
   align-items: center;
