@@ -80,8 +80,10 @@ export default function LoginPage() {
   return (
     <div className="center">
       <div className="card">
-        {/* 只保留美化后的品牌区块 */}
+        {/* 只保留美化后的品牌区块：使用静态图片（请将你的 logo 文件放到 public/logo.png） */}
         <div className="brand-block">
+          {/* 使用原生 img，避免 next/image 的构建/配置差异；把你的附件保存为 public/logo.png 即可生效 */}
+          <img src="/logo.png" alt="RoMeALL Logo" className="logo-image" />
           <h1 className="title">
             RoMe<span className="title-accent">ALL</span>
           </h1>

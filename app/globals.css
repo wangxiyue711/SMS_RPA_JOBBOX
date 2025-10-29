@@ -5,6 +5,15 @@
   margin-bottom: 1rem; /* give more space below brand block */
   gap: 2px; /* tighter stacking between title and subtitle */
 }
+
+/* logo image used on login page */
+.logo-image {
+  width: 200px; /* 放大一点 */
+  height: 200px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto 5px; /* 水平居中并与下方间距（缩短一点点） */
+}
 .title {
   font-size: 2.2rem;
   font-weight: 800;
@@ -20,7 +29,7 @@
   text-fill-color: transparent;
 }
 .title-accent {
-  background: linear-gradient(90deg, #00c6ff 0%, #7b61ff 100%);
+  background: linear-gradient(90deg, #49e97e 0%, #0ea2f8 100%);
   -webkit-background-clip: text;
   color: transparent;
 }
@@ -627,7 +636,7 @@ main {
 .brand-compact {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px; /* 缩短，标题靠 logo 更近一点 */
 }
 .brand-mark {
   width: 6px;
@@ -641,20 +650,25 @@ main {
   display: flex;
   flex-direction: column;
   line-height: 1;
+  /* 向左微调，使正副标题整体靠近 logo */
+  margin-left: -6px;
 }
 .brand-acronym {
   font-weight: 800;
-  font-size: 1.05rem;
+  /* 放大一点以在灰色 header 背景下更醒目 */
+  font-size: 1.2rem;
   color: var(--shade-2);
   letter-spacing: 0.02em;
 }
 .brand-acronym .title-accent {
-  background: linear-gradient(90deg, #00c6ff 0%, #7b61ff 100%);
+  /* use same accent gradient as login title for visual consistency */
+  background: linear-gradient(90deg, #35c44c 0%, #2895ee 100%);
   -webkit-background-clip: text;
   color: transparent;
 }
 .brand-sub {
-  font-size: 0.78rem;
+  /* 副标题适当放大以提升可读性 */
+  font-size: 0.9rem;
   color: #8f9396;
   margin-top: 2px;
 }
@@ -673,6 +687,15 @@ main {
   justify-content: center;
   font-weight: 700;
   color: #fff;
+}
+
+/* header logo (used in Header.tsx) */
+.header-logo {
+  width: 70px;
+  height: 70px;
+  object-fit: contain;
+  display: block;
+  border-radius: 8px; /* keep small rounded corner consistent with brand */
 }
 .brand-name {
   font-weight: 700;
