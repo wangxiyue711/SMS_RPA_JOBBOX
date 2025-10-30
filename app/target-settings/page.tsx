@@ -1502,6 +1502,9 @@ export default function TargetSettingsPage() {
                   <span style={{ marginLeft: 8, fontSize: 14, color: "#666" }}>
                     分後
                   </span>
+                  <span style={{ marginLeft: 12, fontSize: 12, color: "#888" }}>
+                    （最小1分、最大1440分まで指定可能）
+                  </span>
                 </div>
               )}
 
@@ -1786,6 +1789,9 @@ export default function TargetSettingsPage() {
                   />
                   <span style={{ marginLeft: 8, fontSize: 14, color: "#666" }}>
                     分後
+                  </span>
+                  <span style={{ marginLeft: 12, fontSize: 12, color: "#888" }}>
+                    （最小1分、最大1440分まで指定可能）
                   </span>
                 </div>
               )}
