@@ -1177,3 +1177,64 @@ main {
   background: var(--shade-5);
   color: var(--shade-1);
 }
+
+/* Target-Settings: re-order and control buttons (high-tech style) */
+.seg-arrow-btn,
+.seg-ctrl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.02),
+    rgba(255, 255, 255, 0)
+  );
+  border: 1px solid rgba(48, 48, 48, 0.06);
+  color: var(--shade-2);
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 160ms ease, color 120ms ease,
+    background 120ms ease;
+}
+.seg-arrow-btn svg,
+.seg-ctrl-btn svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+}
+.seg-arrow-btn {
+  background: linear-gradient(
+    180deg,
+    rgba(16, 24, 32, 0.02),
+    rgba(255, 255, 255, 0.01)
+  );
+  border-radius: 6px;
+  padding: 6px;
+}
+.seg-arrow-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  color: var(--shade-1);
+  box-shadow: 0 6px 18px rgba(16, 24, 32, 0.08);
+}
+.seg-arrow-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+.seg-ctrl-btn {
+  background: linear-gradient(
+    180deg,
+    rgba(250, 250, 251, 1),
+    rgba(245, 247, 250, 1)
+  );
+  border-radius: 8px;
+  padding: 8px;
+}
+.seg-ctrl-btn:hover {
+  transform: translateY(-2px) scale(1.02);
+  color: var(--shade-1);
+  box-shadow: 0 8px 26px rgba(16, 24, 32, 0.08);
+}

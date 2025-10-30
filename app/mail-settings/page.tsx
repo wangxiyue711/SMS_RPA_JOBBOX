@@ -125,7 +125,7 @@ export default function MailSettingsPage() {
         メール設定
       </h2>
       <p style={{ marginBottom: 24 }}>
-        RPAで監視するメールアドレスとアプリパスワード(16桁)を登録 /
+        RoMeALLで監視するメールアドレスとアプリパスワード(16桁)を登録 /
         管理することができます。
       </p>
 

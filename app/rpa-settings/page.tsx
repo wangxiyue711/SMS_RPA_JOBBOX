@@ -150,7 +150,7 @@ export default function RPASettingsPage() {
         アカウント設定
       </h2>
       <p style={{ marginBottom: 24 }}>
-        RPAで使用する求人ボックスアカウントを登録 / 管理することができます。
+        RoMeALLで使用する求人ボックスアカウントを登録 / 管理することができます。
       </p>
 
       {/* 新規アカウント登録ブロック */}

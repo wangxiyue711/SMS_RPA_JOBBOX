@@ -14,6 +14,7 @@ import {
   serverTimestamp,
   deleteDoc,
   getDoc,
+  writeBatch,
 } from "firebase/firestore";
 
 const serializePlaceholdersFromHtml = (html: string) => {
@@ -942,18 +943,66 @@ export default function TargetSettingsPage() {
     }
   }
 
+  // Move a segment up/down using a batch write that reassigns priority to every item
+  async function moveSegment(id: string, direction: number) {
+    if (!id) return;
+    try {
+      const idx = segments.findIndex((x) => x.id === id);
+      if (idx === -1) return;
+      const newIndex = idx + direction;
+      if (newIndex < 0 || newIndex >= segments.length) return;
+
+      // Build new order by swapping positions
+      const newOrder = [...segments];
+      const tmp = newOrder[idx];
+      newOrder[idx] = newOrder[newIndex];
+      newOrder[newIndex] = tmp;
+
+      // Optimistic UI update
+      setSegments(newOrder.map((seg, i) => ({ ...(seg as any), priority: i })));
+
+      const user = await waitForAuthReady();
+      if (!user) throw new Error("未ログインです。ログインしてください。");
+      const db = getFirestore();
+      const uid = (user as any).uid;
+
+      // Use batch to atomically write new priorities for all items in the list
+      const batch = writeBatch(db);
+      newOrder.forEach((seg, i) => {
+        if (!seg.id) return;
+        const ref = doc(db, "accounts", uid, "target_segments", seg.id);
+        batch.update(ref, { priority: i, updatedAt: serverTimestamp() } as any);
+      });
+
+      await batch.commit();
+
+      // Reload to ensure alignment with server (and pick up any server-side ordering)
+      loadSegments();
+    } catch (e) {
+      console.error("moveSegment (batch) error", e);
+      // fallback: refresh from server
+      loadSegments();
+    }
+  }
+
+  function moveSegmentUp(id: string) {
+    return moveSegment(id, -1);
+  }
+
+  function moveSegmentDown(id: string) {
+    return moveSegment(id, 1);
+  }
+
   return (
     <div style={{ padding: 28 }}>
       <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>
         対象設定
       </h2>
       <p style={{ marginBottom: 16 }}>
-        RPAが対象とする応募者を設定 / 管理することができます。
+        RoMeALLが対象とする応募者を設定 / 管理することができます。
       </p>
 
-      {/* Debug info */}
-
-      {/* Segments (multi-conditions) manager - 完全按照截图重新设计 */}
+      {/* Segments (多条件分组) manager - 完全按照截图重新设计 */}
       <div style={{ marginTop: 24 }}>
         <div
           style={{
@@ -1960,19 +2009,53 @@ export default function TargetSettingsPage() {
                       </div>
                     </label>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => moveSegmentUp(s.id)}
+                      disabled={segments.findIndex((x) => x.id === s.id) === 0}
+                      title="上へ移動"
+                      className="seg-arrow-btn"
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M6 15l6-6 6 6" />
+                      </svg>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => moveSegmentDown(s.id)}
+                      disabled={
+                        segments.findIndex((x) => x.id === s.id) ===
+                        segments.length - 1
+                      }
+                      title="下へ移動"
+                      className="seg-arrow-btn"
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+
                     <button
                       onClick={() => editSegment(s)}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        padding: "8px",
-                        borderRadius: 4,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
+                      className="seg-ctrl-btn"
                       title="編集"
                     >
                       <svg
@@ -1980,7 +2063,7 @@ export default function TargetSettingsPage() {
                         height="16"
                         viewBox="0 0 24 24"
                         fill="none"
-                        stroke="#000"
+                        stroke="currentColor"
                         strokeWidth="2"
                       >
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -1989,16 +2072,7 @@ export default function TargetSettingsPage() {
                     </button>
                     <button
                       onClick={() => showDeleteDialog(s)}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        padding: "8px",
-                        borderRadius: 4,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
+                      className="seg-ctrl-btn"
                       title="削除"
                     >
                       <svg
@@ -2006,7 +2080,7 @@ export default function TargetSettingsPage() {
                         height="16"
                         viewBox="0 0 24 24"
                         fill="none"
-                        stroke="#000"
+                        stroke="currentColor"
                         strokeWidth="2"
                       >
                         <polyline points="3,6 5,6 21,6" />
@@ -2022,17 +2096,19 @@ export default function TargetSettingsPage() {
                 <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
                   <div style={{ marginBottom: 4 }}>
                     <strong>対象:</strong>
-                    {Object.entries(s.conditions.nameTypes)
-                      .filter(([key, enabled]) => enabled)
-                      .map(([key]) => {
-                        const labels = {
-                          kanji: "漢字名",
-                          katakana: "カタカナ名",
-                          hiragana: "ひらがな名",
-                          alpha: "アルファベット名",
-                        } as any;
-                        return labels[key];
-                      })
+                    {["kanji", "katakana", "hiragana", "alpha"]
+                      .filter((k) => (s.conditions.nameTypes as any)[k])
+                      .map(
+                        (k) =>
+                          ((
+                            {
+                              kanji: "漢字名",
+                              katakana: "カタカナ名",
+                              hiragana: "ひらがな名",
+                              alpha: "アルファベット名",
+                            } as any
+                          )[k])
+                      )
                       .join("・") || "なし"}
                   </div>
                   <div style={{ marginBottom: 4 }}>
