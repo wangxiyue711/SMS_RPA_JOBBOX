@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "RPA_JOBBOX",
-  description: "Login page with Firebase auth",
+  title: "RoMeALL with rec-lab",
+  description: "The robot works for me on all tasks.",
 };
 
 import React from "react";

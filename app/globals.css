@@ -2,8 +2,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-bottom: 1rem; /* give more space below brand block */
-  gap: 2px; /* tighter stacking between title and subtitle */
+  margin: 0 0 20px 0; /*统一与表单的垂直间距*/
+  gap: 4px; /*稍微增加标题与副标题间距以改善可读性*/
 }
 
 /* logo image used on login page */
@@ -12,7 +12,11 @@
   height: 200px;
   object-fit: contain;
   display: block;
-  margin: 0 auto 5px; /* 水平居中并与下方间距（缩短一点点） */
+  margin: 0 auto 8px; /* 水平居中并与下方间距，保持与 title/subtitle 的节奏 */
+}
+/* 上移登录页品牌主标题 2px，仅影响 .brand-block 中的 .title */
+.brand-block .title {
+  transform: translateY(-6px);
 }
 .title {
   font-size: 2.2rem;
@@ -43,6 +47,8 @@
   font-weight: 400;
   letter-spacing: 0.05em;
   font-family: "Inter", "Segoe UI", Arial, sans-serif;
+  /* 向上微移 1px，使副标题位置略微上移 */
+  transform: translateY(-10px);
 }
 /* (subtitle styles consolidated above) */
 :root {
@@ -227,19 +233,22 @@ main {
   max-width: 420px;
   background: var(--card);
   border-radius: 14px;
-  padding: 32px;
+  /* 统一上下/左右内边距，保证白框内的左右空白与上下空白一致 */
+  padding: 28px 32px;
   box-shadow: 0 8px 30px rgba(16, 24, 32, 0.08);
   border: 1px solid rgba(48, 48, 48, 0.06);
+  box-sizing: border-box;
 }
 
 /* Center form content inside the card */
 .card form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px; /* 控制表单控件之间的垂直间距 */
   width: 100%;
-  max-width: 400px;
-  margin: 0 auto;
+  max-width: none; /* 让表单填满卡片的可用宽度，保证左右留白一致 */
+  margin: 0; /* 不再需要水平自动居中，因为它会占满内部宽度 */
+  box-sizing: border-box;
 }
 
 .title {
@@ -257,7 +266,7 @@ main {
   color: var(--muted);
 }
 .field-row {
-  margin-bottom: 8px;
+  margin-bottom: 12px; /* 统一表单行的垂直间距，让上下更均衡 */
 }
 
 .input {
@@ -267,7 +276,6 @@ main {
   padding: 12px;
   border-radius: 10px;
   border: 1px solid var(--shade-5);
-  margin-bottom: 14px;
   background: linear-gradient(180deg, #fff, #fafafa);
   color: var(--text);
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.02);
@@ -385,7 +393,8 @@ main {
 }
 .link {
   display: inline-block;
-  margin-top: 12px;
+  /* 增加下方空白，使“パスワードをお忘れですか？”下面留白更宽松 */
+  margin: 12px 0 16px 0;
   color: var(--shade-3);
   text-decoration: underline;
   background: none;
@@ -414,6 +423,21 @@ main {
   position: relative;
   display: flex;
   align-items: center;
+}
+
+/* 仅上移密码行（标签 + 输入框）2px */
+.password-row {
+  transform: translateY(-24px);
+}
+
+/* 仅上移邮箱与密码行（标签 + 输入框）2px */
+.email-row {
+  transform: translateY(-16px);
+}
+
+/* 上移登录按钮 2px（仅登陆页面的按钮） */
+.login-btn {
+  transform: translateY(-13px);
 }
 
 .input-with-icon .input {

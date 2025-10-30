@@ -91,7 +91,7 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={handleLogin}>
-          <div className="field-row">
+          <div className="field-row email-row">
             <label className="label">メールアドレス</label>
             <input
               type="email"
@@ -103,7 +103,7 @@ export default function LoginPage() {
             />
           </div>
 
-          <div className="field-row">
+          <div className="field-row password-row">
             <label className="label">パスワード</label>
             <div className="input-with-icon">
               <input
@@ -148,7 +148,7 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <button type="submit" disabled={loading} className="btn">
+          <button type="submit" disabled={loading} className="btn login-btn">
             {loading ? "処理中..." : "ログイン"}
           </button>
         </form>
