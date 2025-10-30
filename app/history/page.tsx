@@ -195,8 +195,12 @@ export default function HistoryPage() {
 
     const lines = rows.map((r) => {
       const namePair = extractNameAndFurigana(r.name || r.fullName || "");
-      const name = namePair.name;
-      const furigana = namePair.furigana;
+      // 姓名空格统一为半角
+      const name = namePair.name.replace(/[　]+/g, " ").replace(/ +/g, " ");
+      // ふりがな空格统一为半角
+      const furigana = namePair.furigana
+        .replace(/[　]+/g, " ")
+        .replace(/ +/g, " ");
       // const name already extracted above
       const gender = r.gender || "";
       const birthRaw = r.birth || r.birthdate || "";
@@ -415,6 +419,7 @@ export default function HistoryPage() {
       {rows.length > 0 && (
         <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
           <table
+            className="history-table"
             style={{
               width: "100%",
               borderCollapse: "separate",
@@ -426,121 +431,18 @@ export default function HistoryPage() {
             }}
           >
             <thead>
-              <tr
-                style={{
-                  background: "#f6f8fa",
-                  borderBottom: "1px solid #e6e9ee",
-                }}
-              >
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                    letterSpacing: ".2px",
-                  }}
-                >
-                  氏名
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  ふりがな
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  性別
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  生年月日
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  年齢
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  メールアドレス
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  電話番号
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  住所
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  学校名
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  応募No
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  送信日時
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "12px 16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  送信結果
-                </th>
+              <tr>
+                <th style={{ textAlign: "left" }}>氏名</th>
+                <th style={{ textAlign: "left" }}>ふりがな</th>
+                <th style={{ textAlign: "left" }}>性別</th>
+                <th style={{ textAlign: "left" }}>生年月日</th>
+                <th style={{ textAlign: "left" }}>年齢</th>
+                <th style={{ textAlign: "left" }}>メールアドレス</th>
+                <th style={{ textAlign: "left" }}>電話番号</th>
+                <th style={{ textAlign: "left" }}>住所</th>
+                <th style={{ textAlign: "left" }}>応募No</th>
+                <th style={{ textAlign: "left" }}>送信日時</th>
+                <th style={{ textAlign: "left" }}>送信結果</th>
               </tr>
             </thead>
             <tbody>
@@ -550,63 +452,50 @@ export default function HistoryPage() {
                   page * PAGE_SIZE + PAGE_SIZE
                 );
                 return slicedRows.map((r, idx) => (
-                  <tr
-                    key={r.id}
-                    style={{
-                      borderBottom: "1px solid #eee",
-                      background:
-                        (page * PAGE_SIZE + idx) % 2 === 0
-                          ? "#ffffff"
-                          : "#fbfcfd",
-                      transition: "background 120ms ease",
-                    }}
-                  >
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                  <tr key={r.id} className={"history-row"}>
+                    <td className="history-cell">
                       {(() => {
                         const p = extractNameAndFurigana(
                           r.name || r.fullName || ""
                         );
-                        return p.name || r.name || r.fullName || "-";
+                        // 姓名空格统一为半角
+                        return (p.name || r.name || r.fullName || "-")
+                          .replace(/[　]+/g, " ")
+                          .replace(/ +/g, " ");
                       })()}
                     </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    <td className="history-cell">
                       {(() => {
                         const p = extractNameAndFurigana(
                           r.name || r.fullName || ""
                         );
-                        return p.furigana || "-";
+                        // ふりがな空格统一为半角
+                        return (p.furigana || "-")
+                          .replace(/[　]+/g, " ")
+                          .replace(/ +/g, " ");
                       })()}
                     </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                      {r.gender || "-"}
-                    </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    <td className="history-cell">{r.gender || "-"}</td>
+                    <td className="history-cell">
                       {(() => {
                         const raw = r.birth || r.birthdate || "";
                         const bp = extractBirthAndAge(raw);
                         return bp.birth || "-";
                       })()}
                     </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    <td className="history-cell">
                       {(() => {
                         const raw = r.birth || r.birthdate || "";
                         const bp = extractBirthAndAge(raw);
                         return bp.age || "-";
                       })()}
                     </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                      {r.email || "-"}
-                    </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    <td className="history-cell">{r.email || "-"}</td>
+                    <td className="history-cell">
                       {r.tel || r.phone || r.mobilenumber || "-"}
                     </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                      {r.addr || "-"}
-                    </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
-                      {r.school || "-"}
-                    </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    <td className="history-cell">{r.addr || "-"}</td>
+                    <td className="history-cell">
                       {(() => {
                         // Prefer explicit extracted field. If absent, try to extract a clean 応募No pattern from r.oubo_no
                         const extracted = r.oubo_no_extracted;
@@ -626,7 +515,39 @@ export default function HistoryPage() {
                         return raw;
                       })()}
                     </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    <td className="history-cell">
+                      {/* 表格美化样式 */}
+                      <style>{`
+            .history-table th {
+              background: #f6f8fa;
+              font-weight: 700;
+              font-size: 15px;
+              padding: 8px 10px;
+              border-bottom: 2px solid #e6e9ee;
+              color: #222;
+            }
+            .history-table td.history-cell {
+              padding: 8px 10px;
+              border-bottom: 1px solid #e6e9ee;
+              font-size: 14px;
+              color: #222;
+              background: #fff;
+              vertical-align: top;
+              transition: background 0.2s;
+            }
+            .history-table tr.history-row:nth-child(even) td.history-cell {
+              background: #f7fafd;
+            }
+            .history-table tr.history-row:hover td.history-cell {
+              background: #e3f2fd;
+            }
+            .history-table {
+              border-radius: 8px;
+              overflow: hidden;
+              box-shadow: 0 2px 12px rgba(16,24,32,0.06);
+              border: 1px solid #e6e9ee;
+            }
+          `}</style>
                       {(() => {
                         const v =
                           r.sentAt ||
@@ -653,57 +574,123 @@ export default function HistoryPage() {
                         }
                       })()}
                     </td>
-                    <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                    <td className="history-cell">
                       {(() => {
-                        // If not a send target: show 対象外
+                        // 送信結果内容高亮
+                        const getStatusClass = (val) => {
+                          if (!val || val === "-") return "result-unknown";
+                          if (val.includes("送信済")) return "result-success";
+                          if (val.includes("失敗")) return "result-fail";
+                          if (val.includes("対象外") || val === "target_out")
+                            return "result-out";
+                          return "result-unknown";
+                        };
+                        // 原有逻辑
                         const hasStatus =
                           r.status !== undefined &&
                           r.status !== null &&
                           r.status !== "";
                         const hasResponse =
                           r.response !== undefined && r.response !== null;
-                        // If neither status nor response => considered non-target (対象外)
-                        if (!hasStatus && !hasResponse) return "対象外";
-
-                        // Prefer numeric/status field if present
-                        if (hasStatus) {
-                          // If explicitly marked as target_out, show 【対象外】 instead of raw status
+                        let val = "-";
+                        if (!hasStatus && !hasResponse) val = "対象外";
+                        else if (hasStatus) {
                           try {
                             const s = String(r.status || "");
-                            if (s === "target_out") return "対象外";
+                            if (s === "target_out") val = "対象外";
+                            else val = s;
                           } catch (e) {
-                            /* ignore */
+                            val = String(r.status);
                           }
-                          // If status is a numeric string or number, show as-is
-                          return String(r.status);
+                        } else {
+                          try {
+                            if (
+                              typeof r.response === "object" &&
+                              r.response !== null
+                            ) {
+                              const sc =
+                                r.response.status_code ||
+                                r.response.status ||
+                                r.response.code;
+                              if (sc !== undefined && sc !== null && sc !== "")
+                                val = String(sc);
+                            } else if (
+                              typeof r.response === "string" ||
+                              typeof r.response === "number"
+                            ) {
+                              val = String(r.response);
+                            }
+                          } catch (e) {}
                         }
-
-                        // Else try response.status_code
-                        try {
-                          if (
-                            typeof r.response === "object" &&
-                            r.response !== null
-                          ) {
-                            const sc =
-                              r.response.status_code ||
-                              r.response.status ||
-                              r.response.code;
-                            if (sc !== undefined && sc !== null && sc !== "")
-                              return String(sc);
-                          }
-                          // fallback: if response is primitive, show it
-                          if (
-                            typeof r.response === "string" ||
-                            typeof r.response === "number"
-                          )
-                            return String(r.response);
-                        } catch (e) {
-                          // ignore
-                        }
-
-                        return "-";
+                        return (
+                          <span className={getStatusClass(val)}>{val}</span>
+                        );
                       })()}
                     </td>
+                    <style>{`
+            .history-table th {
+              background: #f6f8fa;
+              font-weight: 700;
+              font-size: 15px;
+              padding: 8px 10px;
+              border-bottom: 2px solid #e6e9ee;
+              color: #222;
+            }
+            .history-table td.history-cell {
+              padding: 8px 10px;
+              border-bottom: 1px solid #e6e9ee;
+              font-size: 14px;
+              color: #222;
+              background: #fff;
+              vertical-align: top;
+              transition: background 0.2s;
+            }
+            .history-table tr.history-row:nth-child(even) td.history-cell {
+              background: #f7fafd;
+            }
+            .history-table tr.history-row:hover td.history-cell {
+              background: #e3f2fd;
+            }
+            .history-table {
+              border-radius: 8px;
+              overflow: hidden;
+              box-shadow: 0 2px 12px rgba(16,24,32,0.06);
+              border: 1px solid #e6e9ee;
+            }
+            /* 送信結果高亮样式 */
+            .result-success {
+              color: #219653;
+              font-weight: 700;
+              background: #eafbe7;
+              border-radius: 4px;
+              padding: 2px 6px;
+              display: inline-block;
+            }
+            .result-fail {
+              color: #d32f2f;
+              font-weight: 700;
+              background: #fdeaea;
+              border-radius: 4px;
+              padding: 2px 6px;
+              display: inline-block;
+            }
+            .result-out {
+              color: #888;
+              font-weight: 600;
+              background: #f3f3f3;
+              border-radius: 4px;
+              padding: 2px 6px;
+              display: inline-block;
+            }
+            .result-unknown {
+              color: #222;
+              font-weight: 400;
+              background: #fff;
+              border-radius: 4px;
+              padding: 2px 6px;
+              display: inline-block;
+            }
+          `}</style>
                   </tr>
                 ));
               })()}
