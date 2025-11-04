@@ -465,8 +465,9 @@ main {
 }
 
 .password-toggle svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 /* field-level tooltip for validation errors */

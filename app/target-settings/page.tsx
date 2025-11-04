@@ -1019,6 +1019,7 @@ export default function TargetSettingsPage() {
                 display: "block",
                 marginBottom: 8,
                 fontSize: 14,
+                fontWeight: 700,
                 color: "#333",
               }}
             >
@@ -1050,6 +1051,7 @@ export default function TargetSettingsPage() {
                 display: "block",
                 marginBottom: 8,
                 fontSize: 14,
+                fontWeight: 700,
                 color: "#333",
               }}
             >
@@ -1098,6 +1100,7 @@ export default function TargetSettingsPage() {
                 display: "block",
                 marginBottom: 8,
                 fontSize: 14,
+                fontWeight: 700,
                 color: "#333",
               }}
             >
@@ -1198,6 +1201,7 @@ export default function TargetSettingsPage() {
                     display: "block",
                     marginBottom: 8,
                     fontSize: 14,
+                    fontWeight: 700,
                     color: "#333",
                   }}
                 >
@@ -1261,6 +1265,7 @@ export default function TargetSettingsPage() {
                     display: "block",
                     marginBottom: 8,
                     fontSize: 14,
+                    fontWeight: 700,
                     color: "#333",
                   }}
                 >
@@ -1332,7 +1337,9 @@ export default function TargetSettingsPage() {
                   marginBottom: 8,
                 }}
               >
-                <div style={{ fontSize: 13, color: "#666" }}>SMS本文</div>
+                <div style={{ fontSize: 13, color: "#666", fontWeight: 700 }}>
+                  SMS本文
+                </div>
               </div>
 
               {/* SMS 发送模式选择 */}
@@ -1342,6 +1349,7 @@ export default function TargetSettingsPage() {
                     display: "block",
                     marginBottom: 8,
                     fontSize: 14,
+                    fontWeight: 700,
                     color: "#333",
                   }}
                 >
@@ -1428,6 +1436,7 @@ export default function TargetSettingsPage() {
                       display: "block",
                       marginBottom: 8,
                       fontSize: 14,
+                      fontWeight: 700,
                       color: "#333",
                     }}
                   >
@@ -1469,6 +1478,7 @@ export default function TargetSettingsPage() {
                       display: "block",
                       marginBottom: 8,
                       fontSize: 14,
+                      fontWeight: 700,
                       color: "#333",
                     }}
                   >
@@ -1620,7 +1630,9 @@ export default function TargetSettingsPage() {
                   marginBottom: 8,
                 }}
               >
-                <div style={{ fontSize: 13, color: "#666" }}>メール本文</div>
+                <div style={{ fontSize: 13, color: "#666", fontWeight: 700 }}>
+                  メール本文
+                </div>
               </div>
 
               {/* MAIL 发送模式选择 */}
@@ -1630,6 +1642,7 @@ export default function TargetSettingsPage() {
                     display: "block",
                     marginBottom: 8,
                     fontSize: 14,
+                    fontWeight: 700,
                     color: "#333",
                   }}
                 >
@@ -1716,6 +1729,7 @@ export default function TargetSettingsPage() {
                       display: "block",
                       marginBottom: 8,
                       fontSize: 14,
+                      fontWeight: 700,
                       color: "#333",
                     }}
                   >
@@ -1757,6 +1771,7 @@ export default function TargetSettingsPage() {
                       display: "block",
                       marginBottom: 8,
                       fontSize: 14,
+                      fontWeight: 700,
                       color: "#333",
                     }}
                   >
