@@ -613,6 +613,25 @@ export default function TargetSettingsPage() {
     },
   });
 
+  // Raw input state for delayed minutes to allow temporary empty values during typing
+  const [smsDelayInput, setSmsDelayInput] = useState<string>("30");
+  const [mailDelayInput, setMailDelayInput] = useState<string>("30");
+
+  // Keep raw inputs in sync when segDraft changes (e.g., editing an existing segment)
+  useEffect(() => {
+    const smsVal = segDraft.actions?.sms?.delayMinutes;
+    setSmsDelayInput(
+      smsVal === undefined || smsVal === null ? "" : String(smsVal)
+    );
+    const mailVal = segDraft.actions?.mail?.delayMinutes;
+    setMailDelayInput(
+      mailVal === undefined || mailVal === null ? "" : String(mailVal)
+    );
+  }, [
+    segDraft.actions?.sms?.delayMinutes,
+    segDraft.actions?.mail?.delayMinutes,
+  ]);
+
   useEffect(() => {
     async function initAuth() {
       const user = await waitForAuthReady();
@@ -751,6 +770,34 @@ export default function TargetSettingsPage() {
         return;
       }
 
+      // Validate delayed minutes upper bound (1-1440)
+      if (
+        segDraft.actions.sms.enabled &&
+        segDraft.actions.sms.sendMode === "delayed"
+      ) {
+        const v = segDraft.actions.sms.delayMinutes ?? 0;
+        if (v > 1440 || v < 1) {
+          setSaveMessage({
+            type: "error",
+            text: "SMSの予約送信の時間は1〜1440分の範囲で指定してください。",
+          });
+          return;
+        }
+      }
+      if (
+        segDraft.actions.mail.enabled &&
+        segDraft.actions.mail.sendMode === "delayed"
+      ) {
+        const v = segDraft.actions.mail.delayMinutes ?? 0;
+        if (v > 1440 || v < 1) {
+          setSaveMessage({
+            type: "error",
+            text: "メールの予約送信の時間は1〜1440分の範囲で指定してください。",
+          });
+          return;
+        }
+      }
+
       console.log("Saving segment:", segDraft);
 
       // 测试基本的写权限
@@ -774,7 +821,7 @@ export default function TargetSettingsPage() {
                 text: segDraft.actions.sms.text,
                 sendMode: segDraft.actions.sms.sendMode || "immediate",
                 scheduledTime: segDraft.actions.sms.scheduledTime || "09:00",
-                delayMinutes: segDraft.actions.sms.delayMinutes || 30,
+                delayMinutes: segDraft.actions.sms.delayMinutes,
               },
               mail: {
                 enabled: !!segDraft.actions.mail.enabled,
@@ -784,7 +831,7 @@ export default function TargetSettingsPage() {
                 ),
                 sendMode: segDraft.actions.mail.sendMode || "immediate",
                 scheduledTime: segDraft.actions.mail.scheduledTime || "09:00",
-                delayMinutes: segDraft.actions.mail.delayMinutes || 30,
+                delayMinutes: segDraft.actions.mail.delayMinutes,
               },
             },
             updatedAt: serverTimestamp(),
@@ -804,7 +851,7 @@ export default function TargetSettingsPage() {
               text: segDraft.actions.sms.text,
               sendMode: segDraft.actions.sms.sendMode || "immediate",
               scheduledTime: segDraft.actions.sms.scheduledTime || "09:00",
-              delayMinutes: segDraft.actions.sms.delayMinutes || 30,
+              delayMinutes: segDraft.actions.sms.delayMinutes,
             },
             mail: {
               enabled: !!segDraft.actions.mail.enabled,
@@ -814,7 +861,7 @@ export default function TargetSettingsPage() {
               ),
               sendMode: segDraft.actions.mail.sendMode || "immediate",
               scheduledTime: segDraft.actions.mail.scheduledTime || "09:00",
-              delayMinutes: segDraft.actions.mail.delayMinutes || 30,
+              delayMinutes: segDraft.actions.mail.delayMinutes,
             },
           },
           createdAt: serverTimestamp(),
@@ -992,6 +1039,19 @@ export default function TargetSettingsPage() {
   function moveSegmentDown(id: string) {
     return moveSegment(id, 1);
   }
+
+  // Derived validation flags for delayed minutes inputs
+  const smsDelayNum = parseInt(smsDelayInput || "", 10);
+  const mailDelayNum = parseInt(mailDelayInput || "", 10);
+  const smsDelayInvalid =
+    segDraft.actions.sms.enabled &&
+    segDraft.actions.sms.sendMode === "delayed" &&
+    (isNaN(smsDelayNum) || smsDelayNum > 1440 || smsDelayNum < 1);
+  const mailDelayInvalid =
+    segDraft.actions.mail.enabled &&
+    segDraft.actions.mail.sendMode === "delayed" &&
+    (isNaN(mailDelayNum) || mailDelayNum > 1440 || mailDelayNum < 1);
+  const hasInvalidDelays = smsDelayInvalid || mailDelayInvalid;
 
   return (
     <div style={{ padding: 28 }}>
@@ -1488,19 +1548,22 @@ export default function TargetSettingsPage() {
                     type="number"
                     min="1"
                     max="1440"
-                    value={segDraft.actions.sms.delayMinutes || 30}
-                    onChange={(e) =>
+                    value={smsDelayInput}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setSmsDelayInput(raw);
+                      const num = parseInt(raw, 10);
                       setSegDraft((s) => ({
                         ...s,
                         actions: {
                           ...s.actions,
                           sms: {
                             ...s.actions.sms,
-                            delayMinutes: parseInt(e.target.value) || 30,
+                            delayMinutes: isNaN(num) ? (undefined as any) : num,
                           },
                         },
-                      }))
-                    }
+                      }));
+                    }}
                     style={{
                       padding: "8px 12px",
                       border: "1px solid #ddd",
@@ -1515,6 +1578,20 @@ export default function TargetSettingsPage() {
                   <span style={{ marginLeft: 12, fontSize: 12, color: "#888" }}>
                     （最小1分、最大1440分まで指定可能）
                   </span>
+                  {(() => {
+                    const num = parseInt(smsDelayInput || "", 10);
+                    const invalid =
+                      segDraft.actions.sms.enabled &&
+                      segDraft.actions.sms.sendMode === "delayed" &&
+                      (isNaN(num) || num < 1 || num > 1440);
+                    return invalid ? (
+                      <div
+                        style={{ marginTop: 6, fontSize: 12, color: "#d9534f" }}
+                      >
+                        1440分を超える値は指定できません（1〜1440）。
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               )}
 
@@ -1781,19 +1858,22 @@ export default function TargetSettingsPage() {
                     type="number"
                     min="1"
                     max="1440"
-                    value={segDraft.actions.mail.delayMinutes || 30}
-                    onChange={(e) =>
+                    value={mailDelayInput}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setMailDelayInput(raw);
+                      const num = parseInt(raw, 10);
                       setSegDraft((s) => ({
                         ...s,
                         actions: {
                           ...s.actions,
                           mail: {
                             ...s.actions.mail,
-                            delayMinutes: parseInt(e.target.value) || 30,
+                            delayMinutes: isNaN(num) ? (undefined as any) : num,
                           },
                         },
-                      }))
-                    }
+                      }));
+                    }}
                     style={{
                       padding: "8px 12px",
                       border: "1px solid #ddd",
@@ -1808,6 +1888,20 @@ export default function TargetSettingsPage() {
                   <span style={{ marginLeft: 12, fontSize: 12, color: "#888" }}>
                     （最小1分、最大1440分まで指定可能）
                   </span>
+                  {(() => {
+                    const num = parseInt(mailDelayInput || "", 10);
+                    const invalid =
+                      segDraft.actions.mail.enabled &&
+                      segDraft.actions.mail.sendMode === "delayed" &&
+                      (isNaN(num) || num < 1 || num > 1440);
+                    return invalid ? (
+                      <div
+                        style={{ marginTop: 6, fontSize: 12, color: "#d9534f" }}
+                      >
+                        1440分を超える値は指定できません（1〜1440）。
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               )}
 
@@ -1916,15 +2010,16 @@ export default function TargetSettingsPage() {
           <div style={{ textAlign: "center", marginTop: 24 }}>
             <button
               onClick={saveSegment}
+              disabled={hasInvalidDelays}
               style={{
-                background: "#333",
+                background: hasInvalidDelays ? "#ccc" : "#333",
                 color: "#fff",
                 border: "none",
                 borderRadius: 4,
                 padding: "12px 40px",
                 fontSize: 14,
                 fontWeight: 500,
-                cursor: "pointer",
+                cursor: hasInvalidDelays ? "not-allowed" : "pointer",
                 minWidth: 120,
               }}
             >
