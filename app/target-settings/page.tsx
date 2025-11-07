@@ -2394,7 +2394,7 @@ export default function TargetSettingsPage() {
               <button
                 onClick={deleteDialog.onConfirm}
                 style={{
-                  background: "#dc3545",
+                  background: "rgba(20, 19, 22, 1)",
                   border: "none",
                   color: "#fff",
                   padding: "8px 16px",
