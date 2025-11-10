@@ -805,6 +805,30 @@ export default function TargetSettingsPage() {
         "Testing write permission to path: accounts/" + uid + "/target_segments"
       );
 
+      // Prepare payloads without undefined fields (Firestore rejects undefined)
+      const smsPayload: any = {
+        enabled: !!segDraft.actions.sms.enabled,
+        text: segDraft.actions.sms.text,
+        sendMode: segDraft.actions.sms.sendMode || "immediate",
+        scheduledTime: segDraft.actions.sms.scheduledTime || "09:00",
+      };
+      if (segDraft.actions.sms.sendMode === "delayed") {
+        const v = segDraft.actions.sms.delayMinutes as any;
+        if (typeof v === "number" && !isNaN(v)) smsPayload.delayMinutes = v;
+      }
+
+      const mailPayload: any = {
+        enabled: !!segDraft.actions.mail.enabled,
+        subject: segDraft.actions.mail.subject,
+        body: serializePlaceholdersFromHtml(segDraft.actions.mail.body || ""),
+        sendMode: segDraft.actions.mail.sendMode || "immediate",
+        scheduledTime: segDraft.actions.mail.scheduledTime || "09:00",
+      };
+      if (segDraft.actions.mail.sendMode === "delayed") {
+        const v = segDraft.actions.mail.delayMinutes as any;
+        if (typeof v === "number" && !isNaN(v)) mailPayload.delayMinutes = v;
+      }
+
       // Update if editing existing segment (has id), else add new
       if (segDraft.id) {
         console.log("Updating existing segment:", segDraft.id);
@@ -815,25 +839,7 @@ export default function TargetSettingsPage() {
             enabled: !!segDraft.enabled,
             priority: Number(segDraft.priority) || 0,
             conditions: segDraft.conditions,
-            actions: {
-              sms: {
-                enabled: !!segDraft.actions.sms.enabled,
-                text: segDraft.actions.sms.text,
-                sendMode: segDraft.actions.sms.sendMode || "immediate",
-                scheduledTime: segDraft.actions.sms.scheduledTime || "09:00",
-                delayMinutes: segDraft.actions.sms.delayMinutes,
-              },
-              mail: {
-                enabled: !!segDraft.actions.mail.enabled,
-                subject: segDraft.actions.mail.subject,
-                body: serializePlaceholdersFromHtml(
-                  segDraft.actions.mail.body || ""
-                ),
-                sendMode: segDraft.actions.mail.sendMode || "immediate",
-                scheduledTime: segDraft.actions.mail.scheduledTime || "09:00",
-                delayMinutes: segDraft.actions.mail.delayMinutes,
-              },
-            },
+            actions: { sms: smsPayload, mail: mailPayload },
             updatedAt: serverTimestamp(),
           }
         );
@@ -845,25 +851,7 @@ export default function TargetSettingsPage() {
           enabled: !!segDraft.enabled,
           priority: Number(segDraft.priority) || 0,
           conditions: segDraft.conditions,
-          actions: {
-            sms: {
-              enabled: !!segDraft.actions.sms.enabled,
-              text: segDraft.actions.sms.text,
-              sendMode: segDraft.actions.sms.sendMode || "immediate",
-              scheduledTime: segDraft.actions.sms.scheduledTime || "09:00",
-              delayMinutes: segDraft.actions.sms.delayMinutes,
-            },
-            mail: {
-              enabled: !!segDraft.actions.mail.enabled,
-              subject: segDraft.actions.mail.subject,
-              body: serializePlaceholdersFromHtml(
-                segDraft.actions.mail.body || ""
-              ),
-              sendMode: segDraft.actions.mail.sendMode || "immediate",
-              scheduledTime: segDraft.actions.mail.scheduledTime || "09:00",
-              delayMinutes: segDraft.actions.mail.delayMinutes,
-            },
-          },
+          actions: { sms: smsPayload, mail: mailPayload },
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
