@@ -28,13 +28,15 @@
   font-family: "Inter", "Segoe UI", Arial, sans-serif;
   background: linear-gradient(90deg, #222 0%, #555 100%);
   -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
   background-clip: text;
-  text-fill-color: transparent;
+  -webkit-text-fill-color: transparent;
+
 }
 .title-accent {
   background: linear-gradient(90deg, #49e97e 0%, #0ea2f8 100%);
   -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   color: transparent;
 }
 .subtitle {
@@ -51,20 +53,7 @@
   transform: translateY(-10px);
 }
 /* (subtitle styles consolidated above) */
-:root {
-  /* Grayscale palette provided */
-  --shade-1: #000000;
-  --shade-2: #303030;
-  --shade-3: #5e5e5e;
-  --shade-4: #919191;
-  --shade-5: #c6c6c6;
-
-  --bg: var(--shade-5);
-  --card: #ffffff; /* keep card white for contrast */
-  --muted: var(--shade-4);
-  --text: var(--shade-1);
-  --accent: var(--shade-2);
-}
+/* NOTE: duplicate :root removed (first definition at top of file is retained) */
 
 /* Modern sidebar base styles */
 .sidebar-home-link {
@@ -692,6 +681,8 @@ main {
   /* use same accent gradient as login title for visual consistency */
   background: linear-gradient(90deg, #35c44c 0%, #2895ee 100%);
   -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   color: transparent;
 }
 .brand-sub {
