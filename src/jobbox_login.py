@@ -566,7 +566,48 @@ return 'NOT_FOUND';
         email  = pick(["//*[contains(.,'メールアドレス')]/following::*[1]"])
         tel    = pick(["//*[contains(.,'電話')]/following::*[1]"])
         addr   = pick(["//*[contains(.,'住所')]/following::*[1]"])
-        school = pick(["//*[contains(.,'学校') or contains(.,'学歴')]/following::*[1]"])
+        # 学校名の抽出をより厳密に（"学校" だけの部分一致は "専門学校生" 等にもマッチするため禁止し、必ず "学校名" ラベルに限定）
+        def _xp_eq_school_label(tag):
+            # normalize punctuation and spaces, then exact or prefix match for 学校名[:：]?
+            return (
+                f"//{tag}[normalize-space(translate(., '：:　', '   '))='学校名' ]"
+                f" | //{tag}[starts-with(normalize-space(translate(., '：:　', '   ')), '学校名')]"
+            )
+
+        school = pick([
+            # th/td, dt/dd の厳密ラベル
+            _xp_eq_school_label('th') + "/following-sibling::td[1]",
+            _xp_eq_school_label('dt') + "/following-sibling::dd[1]",
+            # 行（tr/dl）スコープ内でラベル=学校名の最後セルを拾う
+            "(//*[normalize-space(translate(., '：:　', '   '))='学校名' or starts-with(normalize-space(translate(., '：:　', '   ')), '学校名')]/ancestor::*[self::tr or self::dl][1]//*[self::td or self::dd])[last()]",
+        ])
+        # フォールバック（どうしても取れない場合のみ、広い following で拾う）
+        if not school:
+            # 広いフォールバック：ただしラベルは必ず 学校名
+            school = pick(["(//*[normalize-space(translate(., '：:　', '   '))='学校名' or starts-with(normalize-space(translate(., '：:　', '   ')), '学校名')]/following::*[normalize-space(.)!=''])[1]"])
+
+        # 誤抽出ガード：学校名にメールが入ってしまうケースを除外
+        try:
+            # 明らかな誤抽出（メール/電話ラベルや電話番号パターンを含む）をガード
+            if school and (
+                ("@" in school or re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", school))
+                or ('電話' in school) or re.search(r"\b0\d{9,10}\b", school)
+            ):
+                # 既に取得済みの email と同一/包含なら誤検出とみなして再トライ or 空にする
+                if email and (school.strip() == email.strip() or email.strip() in school.strip()):
+                    # もう一段厳しい候補で試す（パネル内の短い値や td/dd のみ、かつ 学校名 ラベル限定）
+                    school_retry = pick([
+                        ".//th[normalize-space(translate(., '：:　', '   '))='学校名' or starts-with(normalize-space(translate(., '：:　', '   ')), '学校名')]/following-sibling::td[1]",
+                        ".//dt[normalize-space(translate(., '：:　', '   '))='学校名' or starts-with(normalize-space(translate(., '：:　', '   ')), '学校名')]/following-sibling::dd[1]",
+                        ".//*[normalize-space(translate(., '：:　', '   '))='学校名' or starts-with(normalize-space(translate(., '：:　', '   ')), '学校名')]/following-sibling::*[string-length(normalize-space(.))>0 and string-length(normalize-space(.))<80][1]",
+                    ])
+                    if school_retry and not ("@" in school_retry) and ('電話' not in school_retry) and (not re.search(r"\b0\d{9,10}\b", school_retry)):
+                        school = school_retry
+                    else:
+                        # どうしても学校名が判別できない場合は空にする（CSV 列ずれ回避のため）
+                        school = ''
+        except Exception:
+            pass
         oubo_dt= pick(["//*[contains(.,'応募日') or contains(.,'応募日時')]/following::*[1]"])
         kyujin = pick(["//*[contains(.,'応募求人')]/following::*[1]"])
         # 如果调用者传入了预期的求人标题，优先使用它以提高匹配准确性

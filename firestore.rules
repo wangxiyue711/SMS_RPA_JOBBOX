@@ -1,71 +1,43 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Basic helpers
+    // 用户身份判断
     function isSignedIn() { return request.auth != null; }
-    function isAdmin() { return isSignedIn() && request.auth.token.admin == true; }
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
 
-    // Per-user jobbox accounts
+    // RPA账号（多条）
     match /accounts/{userId}/jobbox_accounts/{docId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if (isOwner(userId) || isAdmin()) && validJobboxAccount(request.resource.data);
-      allow update: if (isOwner(userId) || isAdmin()) && validJobboxAccount(request.resource.data);
-      allow delete: if isOwner(userId) || isAdmin();
+      allow read, write: if isOwner(userId);
     }
 
-    // Per-user mail settings (single document)
+    // 邮箱设置（单条）
     match /accounts/{userId}/mail_settings/{docId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create, update: if (isOwner(userId) || isAdmin()) && validMailSettings(request.resource.data);
-      allow delete: if isOwner(userId) || isAdmin();
+      allow read, write: if isOwner(userId);
     }
 
-    // Per-user target settings (single document)
+    // 目标设置（单条）
     match /accounts/{userId}/target_settings/{docId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create, update: if (isOwner(userId) || isAdmin()) && validTargetSettings(request.resource.data);
-      allow delete: if isOwner(userId) || isAdmin();
+      allow read, write: if isOwner(userId);
     }
 
-    // Per-user api settings (single document)
+    // 目标分段设置（多条） - 标签保存功能
+    match /accounts/{userId}/target_segments/{docId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // API设置（单条）
     match /accounts/{userId}/api_settings/{docId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create, update: if (isOwner(userId) || isAdmin()) && validApiSettings(request.resource.data);
-      allow delete: if isOwner(userId) || isAdmin();
+      allow read, write: if isOwner(userId);
     }
 
-    // Default deny for all other paths
-    match /{document=**} { allow read, write: if false; }
-
-    // Validation helpers
-    function validJobboxAccount(data) {
-      return data.keys().hasOnly(['account_name','jobbox_id','jobbox_password'])
-        && data.account_name is string && data.account_name.size() > 0 && data.account_name.size() <= 120
-        && data.jobbox_id is string && data.jobbox_id.size() > 0 && data.jobbox_id.size() <= 200
-        && data.jobbox_password is string && data.jobbox_password.size() >= 6 && data.jobbox_password.size() <= 200;
+    // SMS历史记录
+    match /accounts/{userId}/sms_history/{docId} {
+      allow read, write: if isOwner(userId);
     }
 
-    function validMailSettings(data) {
-      return data.keys().hasOnly(['monitorEmail','appPassword','updatedAt'])
-        && data.monitorEmail is string && data.monitorEmail.size() > 0 && data.monitorEmail.size() <= 254
-        && data.appPassword is string && data.appPassword.size() == 16
-        && ( !data.keys().hasAny(['updatedAt']) || data.updatedAt is int );
-    }
-
-    function validTargetSettings(data) {
-      return ( !data.keys().hasAny(['nameTypes']) || (data.nameTypes is list && data.nameTypes.size() > 0 && data.nameTypes[0] is string) )
-        && ( !data.keys().hasAny(['genders']) || (data.genders is list && data.genders.size() > 0 && data.genders[0] is string) )
-        && ( !data.keys().hasAny(['ageRanges']) || (data.ageRanges is map) )
-        && ( !data.keys().hasAny(['updatedAt']) || data.updatedAt is int );
-    }
-
-    function validApiSettings(data) {
-      return data.keys().hasAny(['baseUrl','apiId','apiPass','updatedAt'])
-        && ( !data.keys().hasAny(['baseUrl']) || (data.baseUrl is string && data.baseUrl.size() <= 1024) )
-        && ( !data.keys().hasAny(['apiId']) || (data.apiId is string && data.apiId.size() <= 200) )
-        && ( !data.keys().hasAny(['apiPass']) || (data.apiPass is string && data.apiPass.size() >= 1 && data.apiPass.size() <= 500) )
-        && ( !data.keys().hasAny(['updatedAt']) || data.updatedAt is int );
+    // 默认拒绝其他路径
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

@@ -508,6 +508,65 @@ def _extract_actions(actions_field):
         }
     return {}
 
+
+def calc_age_from_birth_str(birth_str):
+    """尝试从各种常见出生日期字符串解析出精确年龄。
+
+    支持格式示例：
+      - "1990年10月30日"
+      - "1990-10-30" / "1990/10/30"
+      - "1990年10月"
+      - 仅年份 "1990"
+
+    返回整数年龄（精确到月日），解析失败返回 None。
+    """
+    if not birth_str:
+        return None
+    try:
+        import re
+        from datetime import datetime
+
+        s = str(birth_str).strip()
+
+        # 1) YYYY年M月D日
+        m = re.search(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", s)
+        if m:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            b = datetime(y, mo, d)
+            today = datetime.now()
+            age = today.year - b.year - ((today.month, today.day) < (b.month, b.day))
+            return age
+
+        # 2) YYYY-M-D or YYYY/M/D
+        m2 = re.search(r"(\d{4})[\-/](\d{1,2})[\-/](\d{1,2})", s)
+        if m2:
+            y, mo, d = int(m2.group(1)), int(m2.group(2)), int(m2.group(3))
+            b = datetime(y, mo, d)
+            today = datetime.now()
+            age = today.year - b.year - ((today.month, today.day) < (b.month, b.day))
+            return age
+
+        # 3) YYYY年M月 (no day) -> assume day=1 for conservative calc
+        m3 = re.search(r"(\d{4})\s*年\s*(\d{1,2})\s*月", s)
+        if m3:
+            y, mo = int(m3.group(1)), int(m3.group(2))
+            b = datetime(y, mo, 1)
+            today = datetime.now()
+            age = today.year - b.year - ((today.month, today.day) < (b.month, b.day))
+            return age
+
+        # 4) Only year
+        m4 = re.search(r"(\d{4})", s)
+        if m4:
+            y = int(m4.group(1))
+            # Fallback to year-only: still return approximate age but indicate it's approximate by returning int
+            from datetime import datetime as _dt
+            return _dt.now().year - y
+
+        return None
+    except Exception:
+        return None
+
 def _extract_sms_action(sms_field):
     """Extract SMS action from Firestore mapValue."""
     if sms_field.get('mapValue'):
@@ -1478,8 +1537,11 @@ def write_sms_history(uid: str, doc: dict) -> bool:
                     write_doc['email'] = email_addr
                 # Ensure sentAt is an integer. If existing_sentAt is numeric-string, coerce it.
                 try:
-                    write_doc['sentAt'] = int(existing_sentAt) if existing_sentAt is not None else now_ts
-                except Exception:
+                    if existing_sentAt is not None and not isinstance(existing_sentAt, dict):
+                        write_doc['sentAt'] = int(existing_sentAt)
+                    else:
+                        write_doc['sentAt'] = now_ts
+                except (ValueError, TypeError):
                     write_doc['sentAt'] = now_ts
                 write_doc['sms_status'] = final_sms_state
                 write_doc['mail_status'] = final_mail_state
@@ -1652,7 +1714,7 @@ def get_pending_scheduled_tasks(uid):
         creds.refresh(Request())
         token = creds.token
     except Exception as e:
-        print(f'[定时任务] Failed to get token: {e}')
+        print(f'[定時タスク] Failed to get token: {e}')
         return []
     
     project = sa.get('project_id')
@@ -2404,17 +2466,15 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 age_ok = True
                                                 ar = settings.get('ageRanges', {})
                                                 if ar:
-                                                    y = None
-                                                    m = re.search(r'(19|20)\d{2}', birth)
-                                                    if m:
-                                                        try:
-                                                            y = int(m.group(0))
-                                                        except:
-                                                            y = None
-                                                    if y:
-                                                        import datetime
-                                                        now = datetime.datetime.now().year
-                                                        age = now - y
+                                                    # 尝试根据完整出生日期精确计算年龄（如果可行）
+                                                    parsed_age = None
+                                                    try:
+                                                        parsed_age = calc_age_from_birth_str(birth)
+                                                    except Exception:
+                                                        parsed_age = None
+
+                                                    if parsed_age is not None:
+                                                        age = parsed_age
                                                         if '男' in gender:
                                                             if age < ar.get('maleMin', 0) or age > ar.get('maleMax', 999):
                                                                 age_ok = False
@@ -2425,6 +2485,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             if not (ar.get('maleMin',0) <= age <= ar.get('maleMax',999) or ar.get('femaleMin',0) <= age <= ar.get('femaleMax',999)):
                                                                 age_ok = False
                                                     else:
+                                                        # 无法解析出生日期 -> 保持兼容旧逻辑：不把无法解析视为不符合年龄条件
                                                         age_ok = True
 
                                                 return bool(name_ok and gender_ok and age_ok)
@@ -2434,22 +2495,16 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                         # Calculate age from birth date if not present
                                         if 'age' not in detail or not detail.get('age'):
                                             birth_str = detail.get('birth', '') or ''
-                                            calculated_age = 0
+                                            parsed_age = None
                                             if birth_str:
                                                 try:
-                                                    # Try to extract year from birth string (e.g., "1980年1月12日" or "1980年1月12日（45歳）")
-                                                    import re
-                                                    year_match = re.search(r'(\d{4})年', birth_str)
-                                                    if year_match:
-                                                        birth_year = int(year_match.group(1))
-                                                        import datetime
-                                                        current_year = datetime.datetime.now().year
-                                                        calculated_age = current_year - birth_year
-                                                except Exception as e:
-                                                    pass
-                                            
-                                            # Add calculated age to detail
-                                            detail['age'] = calculated_age
+                                                    parsed_age = calc_age_from_birth_str(birth_str)
+                                                except Exception:
+                                                    parsed_age = None
+
+                                            # 仅在成功解析出年龄时写入 detail['age']，解析失败则不修改 age 字段
+                                            if parsed_age is not None:
+                                                detail['age'] = parsed_age
 
                                         # Load all target segments and check if applicant matches any
                                         segments = _get_target_segments(uid)
@@ -3495,8 +3550,20 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
 
 def main():
     print('RPA（求人ボックス用）を開始します')
-    # 全角日语提示：输入 UID（ユーザーID）
-    uid = prompt_input('UID を入力してください')
+    
+    # 支持命令行参数：--uid UID --interval SECONDS
+    import argparse
+    parser = argparse.ArgumentParser(description='Email Watcher for 求人ボックス')
+    parser.add_argument('--uid', type=str, help='UID（ユーザーID）')
+    parser.add_argument('--interval', type=int, help='監視間隔（秒）', default=30)
+    args = parser.parse_args()
+    
+    # 如果命令行提供了 UID，使用它；否则交互式输入
+    if args.uid:
+        uid = args.uid
+        print(f'UID: {uid}')
+    else:
+        uid = prompt_input('UID を入力してください')
 
     # 从 Firestore 拉取该 UID 下的 mail_settings/settings 文档（返回 dict 包含 email 和 appPass）
     def get_mail_settings(uid):
@@ -3571,11 +3638,18 @@ def main():
                 print('16桁のアプリパスワードを正しく入力してください')
     # 直接使用默认 IMAP サーバー，不再要求手动确认
     imap_host = 'imap.gmail.com'
-    poll = prompt_input('間隔', default='30')
-    try:
-        poll_seconds = int(poll)
-    except Exception:
-        poll_seconds = 30
+    
+    # 如果命令行提供了 interval，使用它；否则交互式输入
+    if args.interval and args.interval > 0:
+        poll_seconds = args.interval
+        print(f'監視間隔: {poll_seconds}秒')
+    else:
+        poll = prompt_input('間隔', default='30')
+        try:
+            poll_seconds = int(poll)
+        except Exception:
+            poll_seconds = 30
+    
     watch_mail(imap_host, email_user, email_pass, uid=uid, poll_seconds=poll_seconds)
 
 
