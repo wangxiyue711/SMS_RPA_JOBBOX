@@ -39,6 +39,8 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [serverRows, setServerRows] = useState<any[] | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isSelectMode, setIsSelectMode] = useState(false);
 
   useEffect(() => {
     loadHistory();
@@ -171,6 +173,20 @@ export default function HistoryPage() {
   }
 
   function downloadCsv() {
+    // 如果不在选择模式,进入选择模式
+    if (!isSelectMode) {
+      setIsSelectMode(true);
+      return;
+    }
+
+    // 在选择模式下,执行下载
+    const selectedRows = rows.filter((r) => selectedIds.has(r.id));
+
+    if (selectedRows.length === 0) {
+      alert("ダウンロードする項目を選択してください。");
+      return;
+    }
+
     const headers = [
       "氏名",
       "ふりがな",
@@ -193,7 +209,7 @@ export default function HistoryPage() {
       return `"${s}"`;
     };
 
-    const lines = rows.map((r) => {
+    const lines = selectedRows.map((r) => {
       const namePair = extractNameAndFurigana(r.name || r.fullName || "");
       // 姓名空格统一为半角
       const name = namePair.name.replace(/[　]+/g, " ").replace(/ +/g, " ");
@@ -342,6 +358,57 @@ export default function HistoryPage() {
     URL.revokeObjectURL(url);
   }
 
+  // 切换单个选择
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  // 全选/取消全选当前页
+  const toggleSelectAll = () => {
+    const currentPageRows = rows.slice(
+      page * PAGE_SIZE,
+      (page + 1) * PAGE_SIZE
+    );
+    const currentPageIds = currentPageRows.map((r) => r.id);
+    const allSelected = currentPageIds.every((id) => selectedIds.has(id));
+
+    setSelectedIds((prev) => {
+      const newSet = new Set(prev);
+      if (allSelected) {
+        // 取消全选当前页
+        currentPageIds.forEach((id) => newSet.delete(id));
+      } else {
+        // 全选当前页
+        currentPageIds.forEach((id) => newSet.add(id));
+      }
+      return newSet;
+    });
+  };
+
+  // 检查当前页是否全选
+  const isAllSelected = () => {
+    const currentPageRows = rows.slice(
+      page * PAGE_SIZE,
+      (page + 1) * PAGE_SIZE
+    );
+    if (currentPageRows.length === 0) return false;
+    return currentPageRows.every((r) => selectedIds.has(r.id));
+  };
+
+  // 取消选择模式
+  const cancelSelectMode = () => {
+    setIsSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
   return (
     <div style={{ padding: 28 }}>
       <div
@@ -365,7 +432,9 @@ export default function HistoryPage() {
           <button
             className="btn btn-gray"
             onClick={() => downloadCsv()}
-            disabled={rows.length === 0}
+            disabled={
+              rows.length === 0 || (isSelectMode && selectedIds.size === 0)
+            }
             style={{
               width: "auto",
               display: "inline-flex",
@@ -405,8 +474,23 @@ export default function HistoryPage() {
                 />
               </svg>
             </span>
-            <span>CSV出力</span>
+            <span>
+              {isSelectMode
+                ? `ダウンロード${
+                    selectedIds.size > 0 ? ` (${selectedIds.size})` : ""
+                  }`
+                : "CSV出力"}
+            </span>
           </button>
+          {isSelectMode && (
+            <button
+              className="btn"
+              onClick={cancelSelectMode}
+              style={{ width: "auto" }}
+            >
+              キャンセル
+            </button>
+          )}
         </div>
       </div>
 
@@ -432,6 +516,16 @@ export default function HistoryPage() {
           >
             <thead>
               <tr>
+                {isSelectMode && (
+                  <th style={{ textAlign: "center", width: "40px" }}>
+                    <input
+                      type="checkbox"
+                      checked={isAllSelected()}
+                      onChange={toggleSelectAll}
+                      style={{ cursor: "pointer" }}
+                    />
+                  </th>
+                )}
                 <th style={{ textAlign: "left" }}>氏名</th>
                 <th style={{ textAlign: "left" }}>ふりがな</th>
                 <th style={{ textAlign: "left" }}>性別</th>
@@ -452,7 +546,25 @@ export default function HistoryPage() {
                   page * PAGE_SIZE + PAGE_SIZE
                 );
                 return slicedRows.map((r, idx) => (
-                  <tr key={r.id} className={"history-row"}>
+                  <tr
+                    key={r.id}
+                    className={"history-row"}
+                    onClick={() => isSelectMode && toggleSelect(r.id)}
+                    style={{ cursor: isSelectMode ? "pointer" : "default" }}
+                  >
+                    {isSelectMode && (
+                      <td
+                        className="history-cell"
+                        style={{ textAlign: "center" }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(r.id)}
+                          onChange={() => {}}
+                          style={{ cursor: "pointer", pointerEvents: "none" }}
+                        />
+                      </td>
+                    )}
                     <td className="history-cell">
                       {(() => {
                         const p = extractNameAndFurigana(
