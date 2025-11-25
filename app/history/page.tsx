@@ -41,6 +41,7 @@ export default function HistoryPage() {
   const [serverRows, setServerRows] = useState<any[] | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectMode, setIsSelectMode] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   useEffect(() => {
     loadHistory();
@@ -180,7 +181,7 @@ export default function HistoryPage() {
     }
 
     // 在选择模式下,执行下载
-    const selectedRows = rows.filter((r) => selectedIds.has(r.id));
+    const selectedRows = filteredRows.filter((r) => selectedIds.has(r.id));
 
     if (selectedRows.length === 0) {
       alert("ダウンロードする項目を選択してください。");
@@ -373,7 +374,7 @@ export default function HistoryPage() {
 
   // 全选/取消全选当前页
   const toggleSelectAll = () => {
-    const currentPageRows = rows.slice(
+    const currentPageRows = filteredRows.slice(
       page * PAGE_SIZE,
       (page + 1) * PAGE_SIZE
     );
@@ -395,7 +396,7 @@ export default function HistoryPage() {
 
   // 检查当前页是否全选
   const isAllSelected = () => {
-    const currentPageRows = rows.slice(
+    const currentPageRows = filteredRows.slice(
       page * PAGE_SIZE,
       (page + 1) * PAGE_SIZE
     );
@@ -409,6 +410,119 @@ export default function HistoryPage() {
     setSelectedIds(new Set());
   };
 
+  // 获取送信结果的分类值 - 基于表格中实际显示的文本
+  const getResultCategory = (r: any): string => {
+    // 使用与表格显示相同的逻辑来获取结果文本
+    const hasStatus =
+      r.status !== undefined &&
+      r.status !== null &&
+      String(r.status).trim() !== "";
+    const hasResponse = r.response !== undefined && r.response !== null;
+
+    // 如果既没有status也没有response -> 对象外
+    if (!hasStatus && !hasResponse) return "target_out";
+
+    let displayText = "";
+
+    // 如果status已经包含详细后缀,直接使用
+    try {
+      const s = String(r.status || "").trim();
+      if (
+        s &&
+        (s.indexOf("（M）") >= 0 ||
+          s.indexOf("(M)") >= 0 ||
+          s.indexOf("（S）") >= 0 ||
+          s.indexOf("(S)") >= 0 ||
+          s.indexOf("M+S") >= 0 ||
+          s.indexOf("M+S") >= 0)
+      ) {
+        displayText = s;
+      } else if (
+        s === "送信済" ||
+        s.startsWith("送信済") ||
+        (s.indexOf("送信") >= 0 && s.indexOf("済") >= 0)
+      ) {
+        displayText = "送信済";
+      } else if (s === "target_out") {
+        displayText = "対象外";
+      } else if (s) {
+        displayText = s;
+      }
+    } catch (e) {}
+
+    // 如果还没有displayText,检查response
+    if (!displayText) {
+      try {
+        if (typeof r.response === "object" && r.response !== null) {
+          const sc =
+            r.response.status_code ||
+            r.response.status ||
+            r.response.code ||
+            r.response.codeNumber;
+          const scNum = Number(sc);
+          if (!Number.isNaN(scNum) && scNum >= 200 && scNum < 300) {
+            displayText = "送信済";
+          } else if (!Number.isNaN(scNum)) {
+            displayText = `送信失敗${scNum}`;
+          } else {
+            const asStr = JSON.stringify(r.response || "");
+            if (asStr.indexOf("200") >= 0) {
+              displayText = "送信済";
+            } else {
+              displayText = `送信失敗${asStr}`;
+            }
+          }
+        } else if (
+          typeof r.response === "string" ||
+          typeof r.response === "number"
+        ) {
+          const scNum = Number(r.response);
+          if (!Number.isNaN(scNum) && scNum >= 200 && scNum < 300) {
+            displayText = "送信済";
+          } else {
+            const s = String(r.response);
+            if (s.indexOf("200") >= 0) {
+              displayText = "送信済";
+            } else {
+              displayText = `送信失敗${s}`;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 如果还是没有,但有status,使用status
+    if (!displayText && hasStatus) {
+      displayText = String(r.status);
+    }
+
+    // 如果还是没有,默认为失敗
+    if (!displayText) {
+      displayText = "送信失敗";
+    }
+
+    // 根据displayText分类
+    if (displayText === "対象外" || displayText === "target_out") {
+      return "target_out";
+    }
+    // 所有包含"送信済"的都归为sent类别(不管M、S还是M+S)
+    if (displayText.indexOf("送信済") >= 0) {
+      return "sent";
+    }
+    // 所有包含"失敗"的都归为failed类别
+    if (displayText.indexOf("失敗") >= 0) {
+      return "failed";
+    }
+    // 其他情况
+    return "other";
+  };
+
+  // 筛选后的数据
+  const filteredRows =
+    statusFilter === "all"
+      ? rows
+      : rows.filter((r) => getResultCategory(r) === statusFilter);
+
   return (
     <div style={{ padding: 28 }}>
       <div
@@ -421,6 +535,37 @@ export default function HistoryPage() {
       >
         <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>HISTORY</h2>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setPage(0);
+            }}
+            style={{
+              padding: "8px 12px",
+              fontSize: 14,
+              borderRadius: 6,
+              border: "1px solid #ccc",
+              background: "#fff",
+              cursor: "pointer",
+              minWidth: "160px",
+            }}
+          >
+            <option value="all">すべて ({rows.length})</option>
+            <option value="sent">
+              送信済 (
+              {rows.filter((r) => getResultCategory(r) === "sent").length})
+            </option>
+            <option value="failed">
+              送信失敗 (
+              {rows.filter((r) => getResultCategory(r) === "failed").length})
+            </option>
+            <option value="target_out">
+              対象外 (
+              {rows.filter((r) => getResultCategory(r) === "target_out").length}
+              )
+            </option>
+          </select>
           <button
             className="btn"
             onClick={loadHistory}
@@ -433,7 +578,8 @@ export default function HistoryPage() {
             className="btn btn-gray"
             onClick={() => downloadCsv()}
             disabled={
-              rows.length === 0 || (isSelectMode && selectedIds.size === 0)
+              filteredRows.length === 0 ||
+              (isSelectMode && selectedIds.size === 0)
             }
             style={{
               width: "auto",
@@ -500,7 +646,13 @@ export default function HistoryPage() {
         <div style={{ color: "#666" }}>履歴はまだありません。</div>
       )}
 
-      {rows.length > 0 && (
+      {loadedOnce && rows.length > 0 && filteredRows.length === 0 && (
+        <div style={{ color: "#666" }}>
+          選択した条件に一致する履歴がありません。
+        </div>
+      )}
+
+      {rows.length > 0 && filteredRows.length > 0 && (
         <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
           <table
             className="history-table"
@@ -541,7 +693,7 @@ export default function HistoryPage() {
             </thead>
             <tbody>
               {(() => {
-                const slicedRows = rows.slice(
+                const slicedRows = filteredRows.slice(
                   page * PAGE_SIZE,
                   page * PAGE_SIZE + PAGE_SIZE
                 );
@@ -843,7 +995,7 @@ export default function HistoryPage() {
                       if (!isFinite(n)) return;
                       const total = Math.max(
                         1,
-                        Math.ceil(rows.length / PAGE_SIZE)
+                        Math.ceil(filteredRows.length / PAGE_SIZE)
                       );
                       const p = Math.max(0, Math.min(total - 1, n - 1));
                       setPage(p);
@@ -864,7 +1016,7 @@ export default function HistoryPage() {
                     if (!isFinite(n)) return;
                     const total = Math.max(
                       1,
-                      Math.ceil(rows.length / PAGE_SIZE)
+                      Math.ceil(filteredRows.length / PAGE_SIZE)
                     );
                     const p = Math.max(0, Math.min(total - 1, n - 1));
                     setPage(p);
@@ -885,10 +1037,15 @@ export default function HistoryPage() {
                 className="btn"
                 onClick={() =>
                   setPage((p) =>
-                    Math.min(p + 1, Math.floor((rows.length - 1) / PAGE_SIZE))
+                    Math.min(
+                      p + 1,
+                      Math.floor((filteredRows.length - 1) / PAGE_SIZE)
+                    )
                   )
                 }
-                disabled={page >= Math.floor((rows.length - 1) / PAGE_SIZE)}
+                disabled={
+                  page >= Math.floor((filteredRows.length - 1) / PAGE_SIZE)
+                }
                 style={{ padding: "8px 12px" }}
               >
                 次へ
@@ -896,8 +1053,8 @@ export default function HistoryPage() {
             </div>
 
             <div style={{ color: "#666", fontSize: 13 }}>
-              合計 {rows.length} 件・全{" "}
-              {Math.max(1, Math.ceil(rows.length / PAGE_SIZE))} ページ
+              合計 {filteredRows.length} 件・全{" "}
+              {Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE))} ページ
             </div>
           </div>
         </div>
