@@ -59,10 +59,7 @@ export default function HistoryPage() {
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (
-        filterDropdownOpen &&
-        !target.closest(".filter-dropdown-container")
-      ) {
+      if (filterDropdownOpen && !target.closest(".filter-dropdown-container")) {
         setFilterDropdownOpen(false);
       }
     };
@@ -501,24 +498,30 @@ export default function HistoryPage() {
     if (displayText === "対象外" || displayText === "target_out") {
       return "target_out";
     }
-    
+
     // 检查送信済的详细类型
     if (displayText.indexOf("送信済") >= 0) {
       if (displayText.indexOf("M+S") >= 0 || displayText.indexOf("M+S") >= 0) {
         return "sent_ms";
-      } else if (displayText.indexOf("（M）") >= 0 || displayText.indexOf("(M)") >= 0) {
+      } else if (
+        displayText.indexOf("（M）") >= 0 ||
+        displayText.indexOf("(M)") >= 0
+      ) {
         return "sent_m";
-      } else if (displayText.indexOf("（S）") >= 0 || displayText.indexOf("(S)") >= 0) {
+      } else if (
+        displayText.indexOf("（S）") >= 0 ||
+        displayText.indexOf("(S)") >= 0
+      ) {
         return "sent_s";
       }
       // 如果只是"送信済"没有后缀,可能是旧数据,归为其他
       return "sent_m"; // 默认归为M类
     }
-    
+
     if (displayText.indexOf("失敗") >= 0) {
       return "failed";
     }
-    
+
     return "other";
   };
 
@@ -554,7 +557,10 @@ export default function HistoryPage() {
         <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>HISTORY</h2>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {/* フィルター下拉菜单 */}
-          <div style={{ position: "relative" }} className="filter-dropdown-container">
+          <div
+            style={{ position: "relative" }}
+            className="filter-dropdown-container"
+          >
             <button
               className="btn"
               onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
@@ -624,7 +630,12 @@ export default function HistoryPage() {
                     <span>
                       送信済(M){" "}
                       <span style={{ color: "#888", fontSize: 13 }}>
-                        ({rows.filter((r) => getResultCategory(r) === "sent_m").length})
+                        (
+                        {
+                          rows.filter((r) => getResultCategory(r) === "sent_m")
+                            .length
+                        }
+                        )
                       </span>
                     </span>
                   </label>
@@ -647,7 +658,12 @@ export default function HistoryPage() {
                     <span>
                       送信済(S){" "}
                       <span style={{ color: "#888", fontSize: 13 }}>
-                        ({rows.filter((r) => getResultCategory(r) === "sent_s").length})
+                        (
+                        {
+                          rows.filter((r) => getResultCategory(r) === "sent_s")
+                            .length
+                        }
+                        )
                       </span>
                     </span>
                   </label>
@@ -670,7 +686,12 @@ export default function HistoryPage() {
                     <span>
                       送信済(M+S){" "}
                       <span style={{ color: "#888", fontSize: 13 }}>
-                        ({rows.filter((r) => getResultCategory(r) === "sent_ms").length})
+                        (
+                        {
+                          rows.filter((r) => getResultCategory(r) === "sent_ms")
+                            .length
+                        }
+                        )
                       </span>
                     </span>
                   </label>
@@ -693,7 +714,12 @@ export default function HistoryPage() {
                     <span>
                       送信失敗{" "}
                       <span style={{ color: "#888", fontSize: 13 }}>
-                        ({rows.filter((r) => getResultCategory(r) === "failed").length})
+                        (
+                        {
+                          rows.filter((r) => getResultCategory(r) === "failed")
+                            .length
+                        }
+                        )
                       </span>
                     </span>
                   </label>
@@ -716,7 +742,13 @@ export default function HistoryPage() {
                     <span>
                       対象外{" "}
                       <span style={{ color: "#888", fontSize: 13 }}>
-                        ({rows.filter((r) => getResultCategory(r) === "target_out").length})
+                        (
+                        {
+                          rows.filter(
+                            (r) => getResultCategory(r) === "target_out"
+                          ).length
+                        }
+                        )
                       </span>
                     </span>
                   </label>
