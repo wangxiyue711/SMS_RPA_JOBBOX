@@ -65,7 +65,7 @@ export default function HistoryPage() {
 
       try {
         const smsCollRef = collection(db, "accounts", uid, "sms_history");
-        const smsQ = query(smsCollRef, orderBy("sentAt", "desc"), limit(100));
+        const smsQ = query(smsCollRef, orderBy("sentAt", "desc"));
         const smsSnap = await getDocs(smsQ);
         smsSnap.forEach((d) => {
           out.push({ id: d.id, ...(d.data() as any) });
@@ -77,7 +77,7 @@ export default function HistoryPage() {
       // Read mail_history for backward compatibility (old mail records only)
       try {
         const mailCollRef = collection(db, "accounts", uid, "mail_history");
-        const mailQ = query(mailCollRef, orderBy("sentAt", "desc"), limit(50));
+        const mailQ = query(mailCollRef, orderBy("sentAt", "desc"));
         const mailSnap = await getDocs(mailQ);
         mailSnap.forEach((d) => {
           const data = d.data() as any;
@@ -99,14 +99,14 @@ export default function HistoryPage() {
         console.warn("Failed to load mail_history:", e);
       }
 
-      // Sort all records by sentAt descending and take top 100
+      // Sort all records by sentAt descending
       out.sort((a, b) => {
         const aTime = a.sentAt || 0;
         const bTime = b.sentAt || 0;
         return bTime - aTime;
       });
 
-      setRows(out.slice(0, 100));
+      setRows(out);
       // reset page to first when new data is loaded
       setPage(0);
     } catch (e) {
