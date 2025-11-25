@@ -41,7 +41,10 @@ export default function HistoryPage() {
   const [serverRows, setServerRows] = useState<any[] | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectMode, setIsSelectMode] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilters, setStatusFilters] = useState<Set<string>>(
+    new Set(["sent_m", "sent_s", "sent_ms", "failed", "target_out"])
+  );
+  const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
 
   useEffect(() => {
     loadHistory();
@@ -51,6 +54,21 @@ export default function HistoryPage() {
   useEffect(() => {
     setPageInput(String(page + 1));
   }, [page, rows]);
+
+  // 点击外部关闭下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        filterDropdownOpen &&
+        !target.closest(".filter-dropdown-container")
+      ) {
+        setFilterDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [filterDropdownOpen]);
 
   async function loadHistory() {
     setLoading(true);
@@ -410,47 +428,27 @@ export default function HistoryPage() {
     setSelectedIds(new Set());
   };
 
-  // 获取送信结果的分类值 - 基于表格中实际显示的文本
+  // 获取送信结果的详细分类值
   const getResultCategory = (r: any): string => {
-    // 使用与表格显示相同的逻辑来获取结果文本
     const hasStatus =
       r.status !== undefined &&
       r.status !== null &&
       String(r.status).trim() !== "";
     const hasResponse = r.response !== undefined && r.response !== null;
 
-    // 如果既没有status也没有response -> 对象外
     if (!hasStatus && !hasResponse) return "target_out";
 
     let displayText = "";
 
-    // 如果status已经包含详细后缀,直接使用
     try {
       const s = String(r.status || "").trim();
-      if (
-        s &&
-        (s.indexOf("（M）") >= 0 ||
-          s.indexOf("(M)") >= 0 ||
-          s.indexOf("（S）") >= 0 ||
-          s.indexOf("(S)") >= 0 ||
-          s.indexOf("M+S") >= 0 ||
-          s.indexOf("M+S") >= 0)
-      ) {
+      if (s) {
         displayText = s;
-      } else if (
-        s === "送信済" ||
-        s.startsWith("送信済") ||
-        (s.indexOf("送信") >= 0 && s.indexOf("済") >= 0)
-      ) {
-        displayText = "送信済";
       } else if (s === "target_out") {
         displayText = "対象外";
-      } else if (s) {
-        displayText = s;
       }
     } catch (e) {}
 
-    // 如果还没有displayText,检查response
     if (!displayText) {
       try {
         if (typeof r.response === "object" && r.response !== null) {
@@ -491,37 +489,57 @@ export default function HistoryPage() {
       } catch (e) {}
     }
 
-    // 如果还是没有,但有status,使用status
     if (!displayText && hasStatus) {
       displayText = String(r.status);
     }
 
-    // 如果还是没有,默认为失敗
     if (!displayText) {
       displayText = "送信失敗";
     }
 
-    // 根据displayText分类
+    // 详细分类
     if (displayText === "対象外" || displayText === "target_out") {
       return "target_out";
     }
-    // 所有包含"送信済"的都归为sent类别(不管M、S还是M+S)
+    
+    // 检查送信済的详细类型
     if (displayText.indexOf("送信済") >= 0) {
-      return "sent";
+      if (displayText.indexOf("M+S") >= 0 || displayText.indexOf("M+S") >= 0) {
+        return "sent_ms";
+      } else if (displayText.indexOf("（M）") >= 0 || displayText.indexOf("(M)") >= 0) {
+        return "sent_m";
+      } else if (displayText.indexOf("（S）") >= 0 || displayText.indexOf("(S)") >= 0) {
+        return "sent_s";
+      }
+      // 如果只是"送信済"没有后缀,可能是旧数据,归为其他
+      return "sent_m"; // 默认归为M类
     }
-    // 所有包含"失敗"的都归为failed类别
+    
     if (displayText.indexOf("失敗") >= 0) {
       return "failed";
     }
-    // 其他情况
+    
     return "other";
   };
 
+  // 切换筛选项
+  const toggleFilter = (category: string) => {
+    setStatusFilters((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(category)) {
+        newSet.delete(category);
+      } else {
+        newSet.add(category);
+      }
+      return newSet;
+    });
+    setPage(0);
+  };
+
   // 筛选后的数据
-  const filteredRows =
-    statusFilter === "all"
-      ? rows
-      : rows.filter((r) => getResultCategory(r) === statusFilter);
+  const filteredRows = rows.filter((r) =>
+    statusFilters.has(getResultCategory(r))
+  );
 
   return (
     <div style={{ padding: 28 }}>
@@ -535,37 +553,177 @@ export default function HistoryPage() {
       >
         <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>HISTORY</h2>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <select
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value);
-              setPage(0);
-            }}
-            style={{
-              padding: "8px 12px",
-              fontSize: 14,
-              borderRadius: 6,
-              border: "1px solid #ccc",
-              background: "#fff",
-              cursor: "pointer",
-              minWidth: "160px",
-            }}
-          >
-            <option value="all">すべて ({rows.length})</option>
-            <option value="sent">
-              送信済 (
-              {rows.filter((r) => getResultCategory(r) === "sent").length})
-            </option>
-            <option value="failed">
-              送信失敗 (
-              {rows.filter((r) => getResultCategory(r) === "failed").length})
-            </option>
-            <option value="target_out">
-              対象外 (
-              {rows.filter((r) => getResultCategory(r) === "target_out").length}
-              )
-            </option>
-          </select>
+          {/* フィルター下拉菜单 */}
+          <div style={{ position: "relative" }} className="filter-dropdown-container">
+            <button
+              className="btn"
+              onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
+              style={{
+                width: "auto",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span>フィルター</span>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#666",
+                  background: "#e8f4f8",
+                  padding: "2px 6px",
+                  borderRadius: 10,
+                  fontWeight: 600,
+                }}
+              >
+                {filteredRows.length}/{rows.length}
+              </span>
+              <span style={{ fontSize: 10 }}>
+                {filterDropdownOpen ? "▲" : "▼"}
+              </span>
+            </button>
+
+            {filterDropdownOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  left: 0,
+                  background: "#fff",
+                  border: "1px solid #e0e0e0",
+                  borderRadius: 8,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                  padding: "12px",
+                  minWidth: "200px",
+                  zIndex: 1000,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: "pointer",
+                      fontSize: 14,
+                      padding: "4px 0",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={statusFilters.has("sent_m")}
+                      onChange={() => toggleFilter("sent_m")}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <span>
+                      送信済(M){" "}
+                      <span style={{ color: "#888", fontSize: 13 }}>
+                        ({rows.filter((r) => getResultCategory(r) === "sent_m").length})
+                      </span>
+                    </span>
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: "pointer",
+                      fontSize: 14,
+                      padding: "4px 0",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={statusFilters.has("sent_s")}
+                      onChange={() => toggleFilter("sent_s")}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <span>
+                      送信済(S){" "}
+                      <span style={{ color: "#888", fontSize: 13 }}>
+                        ({rows.filter((r) => getResultCategory(r) === "sent_s").length})
+                      </span>
+                    </span>
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: "pointer",
+                      fontSize: 14,
+                      padding: "4px 0",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={statusFilters.has("sent_ms")}
+                      onChange={() => toggleFilter("sent_ms")}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <span>
+                      送信済(M+S){" "}
+                      <span style={{ color: "#888", fontSize: 13 }}>
+                        ({rows.filter((r) => getResultCategory(r) === "sent_ms").length})
+                      </span>
+                    </span>
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: "pointer",
+                      fontSize: 14,
+                      padding: "4px 0",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={statusFilters.has("failed")}
+                      onChange={() => toggleFilter("failed")}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <span>
+                      送信失敗{" "}
+                      <span style={{ color: "#888", fontSize: 13 }}>
+                        ({rows.filter((r) => getResultCategory(r) === "failed").length})
+                      </span>
+                    </span>
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: "pointer",
+                      fontSize: 14,
+                      padding: "4px 0",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={statusFilters.has("target_out")}
+                      onChange={() => toggleFilter("target_out")}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <span>
+                      対象外{" "}
+                      <span style={{ color: "#888", fontSize: 13 }}>
+                        ({rows.filter((r) => getResultCategory(r) === "target_out").length})
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
           <button
             className="btn"
             onClick={loadHistory}
