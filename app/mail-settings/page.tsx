@@ -28,7 +28,10 @@ async function waitForAuthReady(timeout = 3000): Promise<any | null> {
   });
 }
 
+type SiteType = "jobbox" | "engage";
+
 export default function MailSettingsPage() {
+  const [siteType, setSiteType] = useState<SiteType>("jobbox");
   const [email, setEmail] = useState("");
   const [appPass, setAppPass] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -42,14 +45,16 @@ export default function MailSettingsPage() {
 
   useEffect(() => {
     loadSetting();
-  }, []);
+  }, [siteType]);
 
   async function loadSetting() {
     const user = await waitForAuthReady();
     if (!user) return;
     const db = getFirestore();
     const uid = (user as any).uid;
-    const docRef = doc(db, "accounts", uid, "mail_settings", "settings");
+    const collectionName =
+      siteType === "jobbox" ? "mail_settings" : "engage_mail_settings";
+    const docRef = doc(db, "accounts", uid, collectionName, "settings");
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       const data = snap.data() as any;
@@ -99,7 +104,9 @@ export default function MailSettingsPage() {
     }
     const db = getFirestore();
     const uid = (user as any).uid;
-    const docRef = doc(db, "accounts", uid, "mail_settings", "settings");
+    const collectionName =
+      siteType === "jobbox" ? "mail_settings" : "engage_mail_settings";
+    const docRef = doc(db, "accounts", uid, collectionName, "settings");
     await setDoc(docRef, { email, appPass, createdAt: Date.now() });
     await loadSetting();
     setSuccessMsg("✅ 保存しました！");
@@ -113,7 +120,9 @@ export default function MailSettingsPage() {
     if (!user) return;
     const db = getFirestore();
     const uid = (user as any).uid;
-    await deleteDoc(doc(db, "accounts", uid, "mail_settings", "settings"));
+    const collectionName =
+      siteType === "jobbox" ? "mail_settings" : "engage_mail_settings";
+    await deleteDoc(doc(db, "accounts", uid, collectionName, "settings"));
     setEmail("");
     setAppPass("");
     setLoaded(true);
@@ -128,6 +137,55 @@ export default function MailSettingsPage() {
         RoMeALLで監視するメールアドレスとアプリパスワード(16桁)を登録 /
         管理することができます。
       </p>
+
+      {/* Tab UI for Site Selection */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          marginBottom: 24,
+          borderBottom: "2px solid #e5e7eb",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setSiteType("jobbox")}
+          style={{
+            padding: "12px 24px",
+            fontWeight: 600,
+            background: "transparent",
+            border: "none",
+            borderBottom:
+              siteType === "jobbox"
+                ? "3px solid #36bdccff"
+                : "3px solid transparent",
+            color: siteType === "jobbox" ? "#36bdccff" : "#6b7280",
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          求人ボックス
+        </button>
+        <button
+          type="button"
+          onClick={() => setSiteType("engage")}
+          style={{
+            padding: "12px 24px",
+            fontWeight: 600,
+            background: "transparent",
+            border: "none",
+            borderBottom:
+              siteType === "engage"
+                ? "3px solid #36bdccff"
+                : "3px solid transparent",
+            color: siteType === "engage" ? "#36bdccff" : "#6b7280",
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          エンゲージ
+        </button>
+      </div>
 
       <div
         style={{

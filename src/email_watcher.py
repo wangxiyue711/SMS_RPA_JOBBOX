@@ -105,6 +105,114 @@ def parse_jobbox_body(body):
     }
 
 
+def parse_engage_body(body):
+    """
+    解析エンゲージ的应募通知邮件正文
+    主题关键词: 【要対応】新着応募のお知らせ
+    
+    邮件格式示例（可能是转发消息）:
+    ---------- Forwarded message ----------
+    From: エンゲージ事務局 <system@en-gage.net>
+    ...
+    株式会社 P.P/東京本社
+    上田 真義様
+    
+    エンゲージ事務局です。
+    貴社の採用ページより応募がありました。
+    
+    【 応募職種 】
+    【社会人経験なしでも高収入可】ゲームテスター...
+    
+    【 応募内容の閲覧用URL 】
+    https://en-gage.net/company/manage/message/?apply_id=MTg0MTI0MzI=
+    
+    返回提取的信息字典
+    """
+    result = {
+        'account_name': '',
+        'job_title': '',
+        'url': '',
+        'employer_name': ''
+    }
+    
+    # 提取アカウント名（在"エンゲージ事務局です"之前的公司名）
+    # 方法1: 查找"エンゲージ事務局です"之前的非空行，且包含"株式会社"或"会社"等关键词
+    lines = body.split('\n')
+    engage_idx = -1
+    for i, line in enumerate(lines):
+        if 'エンゲージ事務局です' in line:
+            engage_idx = i
+            break
+    
+    if engage_idx > 0:
+        # 向上查找最近的包含公司名特征的行
+        for i in range(engage_idx - 1, -1, -1):
+            line = lines[i].strip()
+            # 跳过空行和邮件头信息
+            if not line or line.startswith('To:') or line.startswith('From:') or line.startswith('Date:') or line.startswith('Subject:') or line.startswith('----------') or line.startswith('<') or '@' in line:
+                continue
+            # 如果包含"様"，跳过（这是收件人姓名）
+            if '様' in line:
+                continue
+            # 如果包含公司特征词，或者是第一个非特殊字符的行
+            if any(kw in line for kw in ['株式会社', '会社', '有限会社', '合同会社', '本社', '支社', '事業所']):
+                result['account_name'] = line
+                result['employer_name'] = line
+                break
+            # 如果这是一个普通文本行（非邮件头），也可能是公司名
+            elif len(line) > 2 and not line.startswith('-') and not line.startswith('='):
+                result['account_name'] = line
+                result['employer_name'] = line
+                break
+    
+    # 方法2: 如果上面没找到，尝试用正则表达式匹配公司名模式
+    if not result['account_name']:
+        # 在整个邮件中搜索公司名模式（在"エンゲージ事務局です"之前）
+        engage_pos = body.find('エンゲージ事務局です')
+        if engage_pos > 0:
+            before_engage = body[:engage_pos]
+            # 查找包含"株式会社"等的行
+            m = re.search(r'((?:株式会社|有限会社|合同会社|合資会社)[^\n]+?)(?:\n|$)', before_engage)
+            if m:
+                result['account_name'] = m.group(1).strip()
+                result['employer_name'] = result['account_name']
+    
+    # 提取【 応募職種 】（可能有多种格式）
+    # 格式1: 【 応募職種 】
+    m = re.search(r'【\s*応募職種\s*】\s*\n\s*(.+?)(?:\n|$)', body, re.MULTILINE)
+    if m:
+        result['job_title'] = m.group(1).strip()
+    else:
+        # 格式2: 【応募職種】（无空格）
+        m = re.search(r'【応募職種】\s*\n\s*(.+?)(?:\n|$)', body, re.MULTILINE)
+        if m:
+            result['job_title'] = m.group(1).strip()
+    
+    # 提取【 応募内容の閲覧用URL 】（可能有多种格式）
+    # 格式1: 【 応募内容の閲覧用URL 】
+    m = re.search(r'【\s*応募内容の閲覧用URL\s*】\s*\n\s*(https?://[^\s]+)', body, re.MULTILINE)
+    if m:
+        result['url'] = m.group(1).strip()
+    else:
+        # 格式2: 【応募内容の閲覧用URL】（无空格）
+        m = re.search(r'【応募内容の閲覧用URL】\s*\n\s*(https?://[^\s]+)', body, re.MULTILINE)
+        if m:
+            result['url'] = m.group(1).strip()
+        else:
+            # 格式3: 直接查找en-gage.net的URL
+            m = re.search(r'(https://en-gage\.net/company/manage/message/\?apply_id=[A-Za-z0-9=]+)', body)
+            if m:
+                result['url'] = m.group(1).strip()
+    
+    if result['url']:
+        # 从URL中提取apply_id作为oubo_no
+        apply_id_match = re.search(r'apply_id=([A-Za-z0-9=]+)', result['url'])
+        if apply_id_match:
+            result['oubo_no'] = apply_id_match.group(1)
+    
+    return result
+
+
 def normalize_phone_number(number):
     """Normalize and validate phone number for SMS PUBLISHER.
 
@@ -475,6 +583,99 @@ def _get_target_segments(uid: Optional[str]) -> list:
     except Exception as e:
         print(f'Error reading target_segments: {e}')
         return []
+
+
+def _get_engage_target_segments(uid: Optional[str]) -> list:
+    """Read enabled segments from accounts/{uid}/engage_target_segments for エンゲージ.
+
+    Returns list of segment dicts sorted by priority. Each segment contains
+    id, title, enabled, priority, conditions, actions.
+    """
+    sa_file = _find_service_account_file()
+    if not sa_file or not uid:
+        return []
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        with open(sa_file, 'r', encoding='utf-8') as f:
+            sa = json.load(f)
+        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+        creds.refresh(Request())
+        token = creds.token
+    except Exception:
+        return []
+
+    project = sa.get('project_id') if isinstance(sa, dict) else None
+    if not project:
+        return []
+
+    collection_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/engage_target_segments'
+    headers = {'Authorization': f'Bearer {token}'}
+    try:
+        r = requests.get(collection_url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        documents = data.get('documents', [])
+        segments = []
+        for doc in documents:
+            fields = doc.get('fields', {})
+            seg = {
+                'id': doc.get('name', '').split('/')[-1],
+                'title': _extract_string_value(fields.get('title', {})),
+                'enabled': _extract_bool_value(fields.get('enabled', {})),
+                'priority': _extract_int_value(fields.get('priority', {})),
+                'conditions': _extract_conditions(fields.get('conditions', {})),
+                'actions': _extract_actions(fields.get('actions', {})),
+            }
+            if seg['enabled']:
+                segments.append(seg)
+        segments.sort(key=lambda x: x.get('priority', 0))
+        return segments
+    except Exception as e:
+        print(f'Error reading engage_target_segments: {e}')
+        return []
+
+
+def _get_engage_mail_settings(uid: str) -> dict:
+    """Read accounts/{uid}/engage_mail_settings/settings from Firestore.
+
+    Returns dict with possible keys 'email' and 'appPass'. Empty dict on failure.
+    """
+    sa_file = _find_service_account_file()
+    if not sa_file:
+        return {}
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        with open(sa_file, 'r', encoding='utf-8') as f:
+            sa = json.load(f)
+        creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+        creds.refresh(Request())
+        token = creds.token
+    except Exception:
+        return {}
+
+    project = sa.get('project_id') if isinstance(sa, dict) else None
+    if not project:
+        return {}
+    url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/engage_mail_settings/settings'
+    headers = {'Authorization': f'Bearer {token}'}
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return {}
+        data = r.json()
+        fields = data.get('fields', {})
+        res = {}
+        if 'email' in fields:
+            res['email'] = fields['email'].get('stringValue')
+        if 'appPass' in fields:
+            res['appPass'] = fields['appPass'].get('stringValue')
+        return res
+    except Exception:
+        return {}
+
 
 def _extract_genders(genders_field):
     """Extract genders from Firestore mapValue."""
@@ -886,6 +1087,188 @@ def _send_html_mail(from_addr, app_pass, to_addr, subject, html_body):
     This function specifically handles HTML content from the rich text editor.
     """
     return send_mail_once(from_addr, app_pass, to_addr, subject, html_body)
+
+
+def send_via_sms_publisher(to_number, body, api_cfg):
+    """Send SMS via SMS PUBLISHER (module-level function shared by both jobbox and engage).
+
+    Supports:
+    - GET or POST (tries POST, can be configured by api_cfg['method'])
+    - Authentication: Bearer token (apiPass), Basic (apiId/apiPass), or param-based (apiId/apiPass in query/form)
+    - Success criteria: HTTP 2xx OR JSON body with truthy `success`/`ok` field.
+
+    api_cfg keys: baseUrl, apiId, apiPass, method (optional 'GET'|'POST'), path (optional)
+    """
+    dry_run = os.environ.get("DRY_RUN_SMS", "false").lower() in ("1", "true", "yes")
+    if dry_run:
+        print(f"DRY_RUN_SMS enabled — would send to {to_number}: {body}")
+        return (True, {'note': 'dry_run'})
+
+    base = api_cfg.get("baseUrl") or os.environ.get("SMS_PUBLISHER_BASEURL")
+    api_id = api_cfg.get("apiId") or os.environ.get("SMS_PUBLISHER_APIID")
+    api_pass = api_cfg.get("apiPass") or os.environ.get("SMS_PUBLISHER_APIPASS")
+    method = (api_cfg.get("method") or os.environ.get("SMS_PUBLISHER_METHOD") or "POST").upper()
+    path = api_cfg.get("path") or os.environ.get("SMS_PUBLISHER_PATH") or "/send"
+
+    if not base:
+        print("No SMS PUBLISHER baseUrl configured.")
+        return (False, {'error': 'no baseUrl'})
+
+    # If base contains a non-root path, respect it as the full endpoint.
+    # Only append `path` when base is host/root only.
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(base)
+        if parsed.path and parsed.path not in ('', '/'):
+            url = base
+        else:
+            url = base.rstrip('/') + (path if path.startswith('/') else '/' + path)
+    except Exception:
+        url = base.rstrip('/') + (path if path.startswith('/') else '/' + path)
+    
+    headers = {"Accept": "application/json"}
+    timeout = int(os.environ.get("SMS_PUBLISHER_TIMEOUT", "15"))
+
+    # Build auth and params/payload
+    params = {}
+    data = {}
+    json_payload = None
+    auth = None
+
+    # Standard field names we will try (align with working example)
+    field_to = api_cfg.get("fieldTo") or os.environ.get("SMS_PUBLISHER_FIELD_TO") or "mobilenumber"
+    field_message = api_cfg.get("fieldMessage") or os.environ.get("SMS_PUBLISHER_FIELD_MESSAGE") or "smstext"
+
+    # Prefer Bearer token if api_pass present and api_cfg indicates token or no api_id provided
+    if api_pass and (not api_id or api_cfg.get("auth") == "bearer"):
+        headers["Authorization"] = f"Bearer {api_pass}"
+        # ensure values are strings as provider requires JSON values quoted
+        json_payload = {field_to: str(to_number), field_message: str(body)}
+
+    # If auth explicitly basic
+    elif api_id and api_pass and api_cfg.get("auth") == "basic":
+        # Build Basic auth header (Base64 of id:pass) per provider docs
+        import base64
+        pair = f"{api_id}:{api_pass}"
+        enc = base64.b64encode(pair.encode('utf-8')).decode('ascii')
+        headers['Authorization'] = f"Basic {enc}"
+        # prefer form-encoded for basic auth but ensure values sent as strings
+        data = {field_to: str(to_number), field_message: str(body)}
+        json_payload = None
+
+    # Param-based API key (apiId/apiPass as query params)
+    elif api_id and api_pass and api_cfg.get("auth") == "params":
+        # params-based auth: add apiId/apiPass to query/form
+        params.update({"apiId": api_id, "apiPass": api_pass})
+        params.update({field_to: str(to_number), field_message: str(body)})
+
+    # Flexible fallback: prefer Basic when both apiId and apiPass exist,
+    # otherwise fall back to Bearer if only apiPass present, else unauthenticated JSON.
+    else:
+        if api_id and api_pass:
+            # prefer Basic auth when username+password available
+            import base64
+            pair = f"{api_id}:{api_pass}"
+            enc = base64.b64encode(pair.encode('utf-8')).decode('ascii')
+            headers['Authorization'] = f"Basic {enc}"
+            data = {field_to: str(to_number), field_message: str(body)}
+        elif api_pass:
+            headers["Authorization"] = f"Bearer {api_pass}"
+            json_payload = {field_to: str(to_number), field_message: str(body)}
+        else:
+            # No credentials: still try unauthenticated call with JSON
+            json_payload = {field_to: str(to_number), field_message: str(body)}
+
+    # Ensure headers for form posts
+    headers.setdefault('User-Agent', 'sms-rpa/1.0')
+    headers.setdefault('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8')
+
+    try:
+        if method == "GET":
+            # Use params for GET
+            req_params = params.copy()
+            if json_payload:
+                req_params.update(json_payload)
+            if data:
+                req_params.update(data)
+            r = requests.get(url, headers=headers, params=req_params, timeout=timeout)
+        else:
+            # POST
+            if json_payload is not None:
+                r = requests.post(url, headers=headers, json=json_payload, params=params, timeout=timeout,
+                                  auth=locals().get('auth', None))
+            elif data:
+                r = requests.post(url, headers=headers, data=data, params=params, timeout=timeout,
+                                  auth=locals().get('auth', None))
+            else:
+                r = requests.post(url, headers=headers, json={field_to: to_number, field_message: body}, params=params,
+                                  timeout=timeout, auth=locals().get('auth', None))
+
+        # If provider returns 560 (invalid mobile), try converting to 81-prefixed and retry once
+        if r.status_code == 560:
+            try:
+                alt = to81FromLocal(str(to_number))
+            except Exception:
+                alt = None
+            if alt:
+                data_alt = dict(data) if data else {}
+                data_alt[field_to] = alt
+                print('Retrying with 81 prefixed number:', alt)
+                r2 = requests.post(url, headers=headers, data=data_alt, params=params, timeout=timeout)
+                # treat r2
+                if 200 <= r2.status_code < 300:
+                    info_r2 = {'status_code': r2.status_code, 'text': r2.text[:2000]}
+                    try:
+                        info_r2['json'] = r2.json()
+                    except Exception:
+                        pass
+                    print('送信成功(リトライ)', info_r2)
+                    return (True, info_r2)
+                else:
+                    info_r2 = {'status_code': r2.status_code, 'text': r2.text[:2000]}
+                    print('送信失敗(リトライ)', info_r2)
+                    return (False, info_r2)
+
+        # Check HTTP status
+        info_r = {'status_code': r.status_code, 'text': r.text[:2000]}
+        if 200 <= r.status_code < 300:
+            try:
+                info_r['json'] = r.json()
+            except Exception:
+                pass
+            print(f"SMS PUBLISHER returned 2xx for {to_number}: {r.status_code}")
+            return (True, info_r)
+        else:
+            print(f"SMS PUBLISHER HTTP {r.status_code}: {r.text[:1000]}")
+            return (False, info_r)
+
+    except requests.RequestException as e:
+        print(f"Network error sending SMS via SMS PUBLISHER: {e}")
+        return (False, {'error': str(e)})
+
+
+def send_sms_router(to_number, body, provider, api_settings):
+    """Route SMS sending to appropriate provider (module-level function shared by both jobbox and engage).
+    
+    Args:
+        to_number: Phone number to send to
+        body: Message body
+        provider: Provider name (e.g., 'sms_publisher')
+        api_settings: API configuration dict
+    
+    Returns: (success, info)
+    """
+    if provider == 'sms_publisher':
+        return send_via_sms_publisher(to_number, body, api_settings)
+    # fallback: dry run / log
+    dry = os.environ.get('DRY_RUN_SMS') in ('1','true','True')
+    if dry:
+        print(f"[DRY_RUN] SMS ({provider}) => to={to_number} body={body}")
+        return (True, {'note': 'dry_run'})
+    print(f"未対応のプロバイダ: {provider} - ログに記録します。")
+    with open('sms_outbox.log', 'a', encoding='utf-8') as f:
+        f.write(f"{time.time()}\t{provider}\t{to_number}\t{body}\n")
+    return (True, {'note': 'logged'})
 
 
 def send_auto_reply_if_configured(uid, mail_cfg, is_target, detail, jb=None):
@@ -2101,35 +2484,71 @@ def scheduled_task_worker(uid, stop_event):
     print('時刻送信監視停止')
 
 
-def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll_seconds=30):  # type: ignore
-    print('IMAPサーバーに接続しています...')
-    conn = imaplib.IMAP4_SSL(imap_host)
-    conn.login(email_user, email_pass)
-    print('ログインしました。未読メールを監視します（Ctrl+C で停止）')
-    
-    # 启动定时任务后台线程
-    stop_event = threading.Event()
-    task_thread = None
-    if uid:
-        task_thread = threading.Thread(target=scheduled_task_worker, args=(uid, stop_event), daemon=True)
-        task_thread.start()
-    
+def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll_seconds=30, label='Mailbox', category='auto'):  # type: ignore
+    import re
+    print(f'[{label}] IMAPサーバー({imap_host})に接続中... User: {email_user}')
+    mailbox_type = (category or 'auto').lower()
+    handle_jobbox = mailbox_type in ('auto', 'jobbox')
+    handle_engage = mailbox_type in ('auto', 'engage')
+    max_unseen_scan = int(os.environ.get('RPA_MAX_UNREAD_SCAN', '50'))
+    try:
+        conn = imaplib.IMAP4_SSL(imap_host)
+        conn.login(email_user, email_pass)
+        print(f'[{label}] ログインしました。未読メールを監視します')
+    except Exception as e:
+        print(f'[{label}] ❌ ログイン失敗: {e}')
+        return
+
     try:
         while True:
-            conn.select(folder)
-            # 查找所有未读邮件
-            status, data = conn.search(None, 'UNSEEN')
+            try:
+                conn.select(folder)
+                # 查找所有未读邮件
+                status, data = conn.search(None, 'UNSEEN')
+            except (imaplib.IMAP4.abort, socket.error, ConnectionResetError) as e:
+                print(f'[{label}] ⚠️  IMAP接続が切断されました: {e}')
+                print(f'[{label}] 再接続を試みます...')
+                try:
+                    conn = imaplib.IMAP4_SSL(imap_host)
+                    conn.login(email_user, email_pass)
+                    conn.select(folder)
+                    print(f'[{label}] ✓ 再接続成功')
+                    status, data = conn.search(None, 'UNSEEN')
+                except Exception as reconnect_err:
+                    print(f'[{label}] ❌ 再接続失敗: {reconnect_err}')
+                    time.sleep(poll_seconds)
+                    continue
+
             if status != 'OK':
                 time.sleep(poll_seconds)
                 continue
             ids = data[0].split()
+            total_unseen = len(ids)
+            if total_unseen > max_unseen_scan > 0:
+                ids = ids[-max_unseen_scan:]
+            # print(f"[{label}] [DEBUG] Found {total_unseen} unread emails in {folder}")
             if not ids:
                 # 没有未读
                 time.sleep(poll_seconds)
                 continue
             for num in ids:
                 # 先只抓头部，避免把非目标邮件标记为已读
-                status, msg_data = conn.fetch(num, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
+                try:
+                    status, msg_data = conn.fetch(num, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
+                except (imaplib.IMAP4.abort, socket.error, ConnectionResetError) as e:
+                    print(f'[{label}] ⚠️  IMAP接続が切断されました(fetch中): {e}')
+                    print(f'[{label}] 再接続を試みます...')
+                    try:
+                        conn = imaplib.IMAP4_SSL(imap_host)
+                        conn.login(email_user, email_pass)
+                        conn.select(folder)
+                        print(f'[{label}] ✓ 再接続成功')
+                        # 再次尝试fetch
+                        status, msg_data = conn.fetch(num, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
+                    except Exception as reconnect_err:
+                        print(f'[{label}] ❌ 再接続失敗: {reconnect_err}')
+                        break  # 退出当前循环，等待下次监视周期
+                        
                 if status != 'OK' or not msg_data:
                     continue
                 # msg_data can contain tuples; find the first bytes payload
@@ -2141,20 +2560,35 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                     if isinstance(part, (bytes, bytearray)):
                         hdr_bytes = bytes(part)
                         break
-                subject = ''
+                subject_raw = ''
                 if hdr_bytes:
                     try:
                         hdr_msg = email.message_from_bytes(hdr_bytes)
-                        subject = decode_subject(hdr_msg.get('Subject') or '')
+                        subject_raw = decode_subject(hdr_msg.get('Subject') or '')
                     except Exception:
                         try:
                             raw = hdr_bytes.decode('utf-8', errors='ignore')
                             subj_match = re.search(r'Subject:\s*(.*)', raw)
-                            subject = decode_subject(subj_match.group(1).strip()) if subj_match else ''
+                            subject_raw = decode_subject(subj_match.group(1).strip()) if subj_match else ''
                         except Exception:
-                            subject = ''
-                # 简单判断是否为求人ボックス（主题包含关键词）
-                if '新着応募のお知らせ' in subject:
+                            subject_raw = ''
+                
+                # Normalize subject to handle full-width/half-width chars consistently
+                subject = unicodedata.normalize('NFKC', subject_raw) if subject_raw else ''
+                
+                # Detect Engage marker (brackets may normalize to ASCII, so check broadly)
+                has_engage_marker = False
+                if subject_raw and '要対応' in subject_raw:
+                    has_engage_marker = True
+                elif subject and '要対応' in subject:
+                    has_engage_marker = True
+                
+                # print(f"[{label}] [DEBUG] 未読メール検出: {subject}")
+                
+                # ===== 判断求人ボックス邮件（特征：新着応募のお知らせ，但不含要対応标签）=====
+                # 注意：必须排除“要対応”标记，因为那是エンゲージ邮件的特征
+                is_jobbox_subject = '新着応募のお知らせ' in subject and not has_engage_marker
+                if handle_jobbox and is_jobbox_subject:
                     # 获取整封邮件正文（不影响已读标记，使用 PEEK）
                     status, full = conn.fetch(num, '(BODY.PEEK[])')
                     if status != 'OK' or not full:
@@ -2192,17 +2626,17 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                         elif isinstance(payload, str):
                             body = payload
                     parsed = parse_jobbox_body(body)
-                    print('---- 求人ボックスの未読メールを検出 ----')
-                    print('件名:', subject)
-                    print('アカウント名:', parsed['account_name'])
-                    print('アカウントID:', parsed['account_id'])
-                    print('求人タイトル:', parsed['job_title'])
-                    print('ログインURL（固定）:', parsed['url'])
+                    print(f'[{label}] ---- 求人ボックスの未読メールを検出 ----')
+                    print(f'[{label}] 件名:', subject)
+                    print(f'[{label}] アカウント名:', parsed['account_name'])
+                    print(f'[{label}] アカウントID:', parsed['account_id'])
+                    print(f'[{label}] 求人タイトル:', parsed['job_title'])
+                    print(f'[{label}] ログインURL（固定）:', parsed['url'])
                     # 标记为已读
                     conn.store(num, '+FLAGS', '\\Seen')
                     # アカウント名が見つかったら自動でログイン処理を実行（URLは固定値を使用）
                     if parsed.get('account_name'):
-                        print('アカウント情報を検出しました。固定URLを使用して自動ログイン処理を実行します。')
+                        print(f'[{label}] アカウント情報を検出しました。固定URLを使用して自動ログイン処理を実行します。')
 
                         # 从 Firestore 的 jobbox_accounts 列表中查找匹配的 account_name
                         def get_jobbox_accounts(uid):
@@ -2217,7 +2651,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                             if uid in cache:
                                 ts, accounts = cache[uid]
                                 if time.time() - ts < CACHE_TTL:
-                                    print(f"[DEBUG_JOBBOX] returning cached jobbox_accounts for uid={uid} (age={int(time.time()-ts)}s)")
+                                    print(f"[{label}] [DEBUG_JOBBOX] returning cached jobbox_accounts for uid={uid} (age={int(time.time()-ts)}s)")
                                     return accounts
                             sa_candidates = [
                                 os.path.join(os.getcwd(), 'service-account'),
@@ -2242,7 +2676,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                 creds.refresh(Request())
                                 token = creds.token
                                 t1 = time.time()
-                                print(f"[DEBUG_JOBBOX] service-account load+token refresh took {int((t1-t0)*1000)}ms")
+                                print(f"[{label}] [DEBUG_JOBBOX] service-account load+token refresh took {int((t1-t0)*1000)}ms")
                             except Exception:
                                 return []
                             project = sa.get('project_id')
@@ -2266,7 +2700,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                     tn1 = time.time()
                                     network_time += (tn1 - tn0)
                                     if r.status_code != 200:
-                                        print(f"[DEBUG_JOBBOX] requests.get returned {r.status_code}")
+                                        print(f"[{label}] [DEBUG_JOBBOX] requests.get returned {r.status_code}")
                                         break
                                     data = r.json()
                                     docs = data.get('documents', [])
@@ -2282,7 +2716,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                     if not page_token:
                                         break
                                 t_end = time.time()
-                                print(f"[DEBUG_JOBBOX] fetched {len(accounts)} accounts in {int((t_end-t_start)*1000)}ms (network {int(network_time*1000)}ms)")
+                                print(f"[{label}] [DEBUG_JOBBOX] fetched {len(accounts)} accounts in {int((t_end-t_start)*1000)}ms (network {int(network_time*1000)}ms)")
                                 # store in cache
                                 try:
                                     cache[uid] = (time.time(), accounts)
@@ -2290,7 +2724,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                     pass
                                 return accounts
                             except Exception as e:
-                                print(f"[DEBUG_JOBBOX] exception while fetching jobbox_accounts: {e}")
+                                print(f"[{label}] [DEBUG_JOBBOX] exception while fetching jobbox_accounts: {e}")
                                 return accounts
 
                         remote_accounts = get_jobbox_accounts(uid)
@@ -2327,23 +2761,23 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                 break
 
                         if not match_account:
-                            print(f"メール内のアカウント名 '{parsed_name}' は jobbox_accounts に見つかりませんでした。自動ログインをスキップします。")
+                            print(f"[{label}] メール内のアカウント名 '{parsed_name}' は jobbox_accounts に見つかりませんでした。自動ログインをスキップします。")
                             continue
 
                         try:
                             from jobbox_login import JobboxLogin
                         except Exception:
-                            print('自動ログイン機能は無効です：`src/jobbox_login.py` を確認してください。')
+                            print(f'[{label}] 自動ログイン機能は無効です：`src/jobbox_login.py` を確認してください。')
                         else:
                             try:
                                 jb = JobboxLogin(match_account)
                             except Exception as e:
-                                print(f'アカウントの初期化に失敗しました: {e}')
+                                print(f'[{label}] アカウントの初期化に失敗しました: {e}')
                             else:
                                 try:
                                     info = jb.login_and_goto(parsed.get('url'), parsed.get('job_title'), parsed.get('oubo_no'))
                                 except Exception as e:
-                                    print(f'自動ログイン中に例外が発生しました: {e}')
+                                    print(f'[{label}] 自動ログイン中に例外が発生しました: {e}')
                                     info = None
                                 # 不在此处关闭 jb；保留会话以便在发送成功时写入メモ。
                                 # 如果 login_and_goto 返回了 detail，则调用云端的 target_settings 做匹配判定
@@ -2537,14 +2971,14 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                         is_target = sms_target_segment is not None
                                         
                                         if sms_target_segment:
-                                            print(f'この応募者はSMSの送信対象です。（「{sms_target_segment["title"]}」セグメントに該当）')
+                                            print(f'[{label}] この応募者はSMSの送信対象です。（「{sms_target_segment["title"]}」セグメントに該当）')
                                         else:
-                                            print('この応募者はSMSの送信対象ではありません。')
+                                            print(f'[{label}] この応募者はSMSの送信対象ではありません。')
                                         
                                         if mail_target_segment:
-                                            print(f'この応募者はメールの送信対象です。（「{mail_target_segment["title"]}」セグメントに該当）')
+                                            print(f'[{label}] この応募者はメールの送信対象です。（「{mail_target_segment["title"]}」セグメントに該当）')
                                         else:
-                                            print('この応募者はメールの送信対象ではありません。')
+                                            print(f'[{label}] この応募者はメールの送信対象ではありません。')
 
                                         # Determine if we need combined status logic
                                         if sms_target_segment and mail_target_segment:
@@ -2572,174 +3006,6 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                             api_settings = get_api_settings(uid)
                                             provider = (api_settings.get('provider') or 'sms_publisher')
 
-                                            def send_via_sms_publisher(to_number, body, api_cfg):
-                                                """Send SMS via SMS PUBLISHER.
-
-                                                Supports:
-                                                - GET or POST (tries POST, can be configured by api_cfg['method'])
-                                                - Authentication: Bearer token (apiPass), Basic (apiId/apiPass), or param-based (apiId/apiPass in query/form)
-                                                - Success criteria: HTTP 2xx OR JSON body with truthy `success`/`ok` field.
-
-                                                api_cfg keys: baseUrl, apiId, apiPass, method (optional 'GET'|'POST'), path (optional)
-                                                """
-                                                dry_run = os.environ.get("DRY_RUN_SMS", "false").lower() in ("1", "true", "yes")
-                                                if dry_run:
-                                                    print(f"DRY_RUN_SMS enabled — would send to {to_number}: {body}")
-                                                    return (True, {'note': 'dry_run'})
-
-                                                base = api_cfg.get("baseUrl") or os.environ.get("SMS_PUBLISHER_BASEURL")
-                                                api_id = api_cfg.get("apiId") or os.environ.get("SMS_PUBLISHER_APIID")
-                                                api_pass = api_cfg.get("apiPass") or os.environ.get("SMS_PUBLISHER_APIPASS")
-                                                method = (api_cfg.get("method") or os.environ.get("SMS_PUBLISHER_METHOD") or "POST").upper()
-                                                path = api_cfg.get("path") or os.environ.get("SMS_PUBLISHER_PATH") or "/send"
-
-                                                if not base:
-                                                    print("No SMS PUBLISHER baseUrl configured.")
-                                                    return False
-
-                                                # If base contains a non-root path, respect it as the full endpoint.
-                                                # Only append `path` when base is host/root only.
-                                                from urllib.parse import urlparse
-                                                try:
-                                                    parsed = urlparse(base)
-                                                    if parsed.path and parsed.path not in ('', '/'):
-                                                        url = base
-                                                    else:
-                                                        url = base.rstrip('/') + (path if path.startswith('/') else '/' + path)
-                                                except Exception:
-                                                    url = base.rstrip('/') + (path if path.startswith('/') else '/' + path)
-                                                headers = {"Accept": "application/json"}
-                                                timeout = int(os.environ.get("SMS_PUBLISHER_TIMEOUT", "15"))
-
-                                                # Build auth and params/payload
-                                                params = {}
-                                                data = {}
-                                                json_payload = None
-                                                auth = None
-
-                                                # Standard field names we will try (align with working example)
-                                                field_to = api_cfg.get("fieldTo") or os.environ.get("SMS_PUBLISHER_FIELD_TO") or "mobilenumber"
-                                                field_message = api_cfg.get("fieldMessage") or os.environ.get("SMS_PUBLISHER_FIELD_MESSAGE") or "smstext"
-
-                                                # Prefer Bearer token if api_pass present and api_cfg indicates token or no api_id provided
-                                                if api_pass and (not api_id or api_cfg.get("auth") == "bearer"):
-                                                    headers["Authorization"] = f"Bearer {api_pass}"
-                                                    # ensure values are strings as provider requires JSON values quoted
-                                                    json_payload = {field_to: str(to_number), field_message: str(body)}
-
-                                                # If auth explicitly basic
-                                                elif api_id and api_pass and api_cfg.get("auth") == "basic":
-                                                    # Build Basic auth header (Base64 of id:pass) per provider docs
-                                                    import base64
-                                                    pair = f"{api_id}:{api_pass}"
-                                                    enc = base64.b64encode(pair.encode('utf-8')).decode('ascii')
-                                                    headers['Authorization'] = f"Basic {enc}"
-                                                    # prefer form-encoded for basic auth but ensure values sent as strings
-                                                    data = {field_to: str(to_number), field_message: str(body)}
-                                                    json_payload = None
-
-                                                # Param-based API key (apiId/apiPass as query params)
-                                                elif api_id and api_pass and api_cfg.get("auth") == "params":
-                                                    # params-based auth: add apiId/apiPass to query/form
-                                                    params.update({"apiId": api_id, "apiPass": api_pass})
-                                                    params.update({field_to: str(to_number), field_message: str(body)})
-
-                                                # Flexible fallback: prefer Basic when both apiId and apiPass exist,
-                                                # otherwise fall back to Bearer if only apiPass present, else unauthenticated JSON.
-                                                else:
-                                                    if api_id and api_pass:
-                                                        # prefer Basic auth when username+password available
-                                                        import base64
-                                                        pair = f"{api_id}:{api_pass}"
-                                                        enc = base64.b64encode(pair.encode('utf-8')).decode('ascii')
-                                                        headers['Authorization'] = f"Basic {enc}"
-                                                        data = {field_to: str(to_number), field_message: str(body)}
-                                                    elif api_pass:
-                                                        headers["Authorization"] = f"Bearer {api_pass}"
-                                                        json_payload = {field_to: str(to_number), field_message: str(body)}
-                                                    else:
-                                                        # No credentials: still try unauthenticated call with JSON
-                                                        json_payload = {field_to: str(to_number), field_message: str(body)}
-
-                                                # Ensure headers for form posts
-                                                headers.setdefault('User-Agent', 'sms-rpa/1.0')
-                                                headers.setdefault('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8')
-
-                                                try:
-                                                    if method == "GET":
-                                                        # Use params for GET
-                                                        req_params = params.copy()
-                                                        if json_payload:
-                                                            req_params.update(json_payload)
-                                                        if data:
-                                                            req_params.update(data)
-                                                        r = requests.get(url, headers=headers, params=req_params, timeout=timeout)
-                                                    else:
-                                                        # POST
-                                                        if json_payload is not None:
-                                                            r = requests.post(url, headers=headers, json=json_payload, params=params, timeout=timeout,
-                                                                              auth=locals().get('auth', None))
-                                                        elif data:
-                                                            r = requests.post(url, headers=headers, data=data, params=params, timeout=timeout,
-                                                                              auth=locals().get('auth', None))
-                                                        else:
-                                                            r = requests.post(url, headers=headers, json={field_to: to_number, field_message: body}, params=params,
-                                                                              timeout=timeout, auth=locals().get('auth', None))
-
-                                                    # If provider returns 560 (invalid mobile), try converting to 81-prefixed and retry once
-                                                    if r.status_code == 560:
-                                                        try:
-                                                            alt = to81FromLocal(str(to_number))
-                                                        except Exception:
-                                                            alt = None
-                                                        if alt:
-                                                            data_alt = dict(data) if data else {}
-                                                            data_alt[field_to] = alt
-                                                            print('Retrying with 81 prefixed number:', alt)
-                                                            r2 = requests.post(url, headers=headers, data=data_alt, params=params, timeout=timeout)
-                                                            # treat r2
-                                                            if 200 <= r2.status_code < 300:
-                                                                info_r2 = {'status_code': r2.status_code, 'text': r2.text[:2000]}
-                                                                try:
-                                                                    info_r2['json'] = r2.json()
-                                                                except Exception:
-                                                                    pass
-                                                                print('送信成功(リトライ)', info_r2)
-                                                                return (True, info_r2)
-                                                            else:
-                                                                info_r2 = {'status_code': r2.status_code, 'text': r2.text[:2000]}
-                                                                print('送信失敗(リトライ)', info_r2)
-                                                                return (False, info_r2)
-
-                                                    # Check HTTP status
-                                                    info_r = {'status_code': r.status_code, 'text': r.text[:2000]}
-                                                    if 200 <= r.status_code < 300:
-                                                        try:
-                                                            info_r['json'] = r.json()
-                                                        except Exception:
-                                                            pass
-                                                        print(f"SMS PUBLISHER returned 2xx for {to_number}: {r.status_code}")
-                                                        return (True, info_r)
-                                                    else:
-                                                        print(f"SMS PUBLISHER HTTP {r.status_code}: {r.text[:1000]}")
-                                                        return (False, info_r)
-
-                                                except requests.RequestException as e:
-                                                    print(f"Network error sending SMS via SMS PUBLISHER: {e}")
-                                                    return (False, {'error': str(e)})
-
-                                            def send_sms_router(to_number, body):
-                                                if provider == 'sms_publisher':
-                                                    return send_via_sms_publisher(to_number, body, api_settings)
-                                                # fallback: dry run / log
-                                                dry = os.environ.get('DRY_RUN_SMS') in ('1','true','True')
-                                                if dry:
-                                                    print(f"[DRY_RUN] SMS ({provider}) => to={to_number} body={body}")
-                                                    return (True, {'note': 'dry_run'})
-                                                print(f"未対応のプロバイダ: {provider} - ログに記録します。")
-                                                with open('sms_outbox.log', 'a', encoding='utf-8') as f:
-                                                    f.write(f"{time.time()}\t{provider}\t{to_number}\t{body}\n")
-                                                return (True, {'note': 'logged'})
 
                                             tel = detail.get('tel') or detail.get('電話番号') or ''
                                             
@@ -2751,17 +3017,17 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                             sms_delay_minutes = sms_action.get('delayMinutes', 30)
                                             
                                             # Debug: print SMS action settings
-                                            print(f'[DEBUG] SMS Action Settings:')
-                                            print(f'  sendMode: {sms_send_mode}')
-                                            print(f'  scheduledTime: {sms_scheduled_time}')
-                                            print(f'  delayMinutes: {sms_delay_minutes}')
-                                            print(f'  sms_action keys: {list(sms_action.keys())}')
+                                            print(f'[{label}] [DEBUG] SMS Action Settings:')
+                                            print(f'[{label}]   sendMode: {sms_send_mode}')
+                                            print(f'[{label}]   scheduledTime: {sms_scheduled_time}')
+                                            print(f'[{label}]   delayMinutes: {sms_delay_minutes}')
+                                            print(f'[{label}]   sms_action keys: {list(sms_action.keys())}')
                                             
                                             if tel and tpl and sms_target_segment and sms_action['enabled']:
                                                 norm, ok, reason = normalize_phone_number(tel)
                                                 dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
                                                 if not ok:
-                                                    print(f'電話番号の検証に失敗しました: {tel} -> {norm} 理由: {reason}。SMSは送信されません。')
+                                                    print(f'[{label}] 電話番号の検証に失敗しました: {tel} -> {norm} 理由: {reason}。SMSは送信されません。')
                                                     # write target-out / invalid-phone history when not dry-run
                                                     if not dry_run_env and uid:
                                                         try:
@@ -2780,12 +3046,12 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             }
                                                             ok_write = write_sms_history(str(uid), rec)
                                                             if not ok_write:
-                                                                print('Failed to write sms_history for invalid phone')
+                                                                print(f'[{label}] Failed to write sms_history for invalid phone')
                                                         except Exception as e:
-                                                            print('Exception when writing sms_history for invalid phone:', e)
+                                                            print(f'[{label}] Exception when writing sms_history for invalid phone:', e)
                                                 elif sms_send_mode == 'scheduled':
                                                     # 定时发送: 创建定时任务
-                                                    print(f'SMS時刻送信を設定します: {sms_scheduled_time}')
+                                                    print(f'[{label}] SMS時刻送信を設定します: {sms_scheduled_time}')
                                                     # Prepare COMPLETE applicant data (for both template substitution AND history writing)
                                                     try:
                                                         company_val = detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
@@ -2823,7 +3089,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'school': detail.get('school') or detail.get('学校名'),
                                                         }
                                                     except Exception as e:
-                                                        print(f'[SMS時刻] applicant_detail構築エラー: {e}')
+                                                        print(f'[{label}] [SMS時刻] applicant_detail構築エラー: {e}')
                                                         applicant_detail_for_task = {}
                                                     
                                                     task_ok = create_scheduled_task(
@@ -2942,7 +3208,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                     except Exception:
                                                         tpl_to_send = tpl
 
-                                                    success, info = send_sms_router(norm, tpl_to_send)
+                                                    success, info = send_sms_router(norm, tpl_to_send, provider, api_settings)
                                                     sms_attempted = True
                                                     sms_ok = success
                                                     sms_info = info
@@ -3534,8 +3800,794 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                         jb.close()
                                 except Exception:
                                     pass
+                
+                is_engage_subject = has_engage_marker and '新着応募' in subject
+                if handle_engage and is_engage_subject:
+                    # ===== エンゲージ邮件处理 =====
+                    # 获取整封邮件正文（不影响已读标记，使用 PEEK）
+                    status, full = conn.fetch(num, '(BODY.PEEK[])')
+                    if status != 'OK' or not full:
+                        continue
+                    
+                    full_bytes = None
+                    for part in full:
+                        if isinstance(part, tuple) and len(part) > 1 and isinstance(part[1], (bytes, bytearray)):
+                            full_bytes = bytes(part[1])
+                            break
+                        if isinstance(part, (bytes, bytearray)):
+                            full_bytes = bytes(part)
+                            break
+                    
+                    if not full_bytes:
+                        continue
+                    
+                    msg = email.message_from_bytes(full_bytes)
+                    body = ''
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            ctype = part.get_content_type()
+                            if ctype == 'text/plain':
+                                payload = part.get_payload(decode=True)
+                                if isinstance(payload, (bytes, bytearray)):
+                                    try:
+                                        body = payload.decode(part.get_content_charset() or 'utf-8', errors='ignore')
+                                    except Exception:
+                                        body = payload.decode('utf-8', errors='ignore')
+                                elif isinstance(payload, str):
+                                    body = payload
+                                break
+                    else:
+                        payload = msg.get_payload(decode=True)
+                        if isinstance(payload, (bytes, bytearray)):
+                            body = payload.decode(msg.get_content_charset() or 'utf-8', errors='ignore')
+                        elif isinstance(payload, str):
+                            body = payload
+                    
+                    parsed = parse_engage_body(body)
+                    print('---- エンゲージの未読メールを検出 ----')
+                    print('件名:', subject)
+                    print('アカウント名:', parsed['account_name'])
+                    print('応募職種:', parsed['job_title'])
+                    print('URL:', parsed['url'])
+                    
+                    # 标记为已读
+                    conn.store(num, '+FLAGS', '\\Seen')
+                    
+                    # アカウント名が見つかったら自動でログイン処理を実行
+                    if parsed.get('account_name') and parsed.get('url'):
+                        print('エンゲージのアカウント情報を検出しました。自動ログイン処理を実行します。')
+                        
+                        # 从 Firestore 的 engage_accounts 列表中查找匹配的 account_name
+                        def get_engage_accounts(uid):
+                            if not uid:
+                                return []
+                            sa_file = _find_service_account_file()
+                            if not sa_file:
+                                return []
+                            try:
+                                from google.oauth2 import service_account
+                                from google.auth.transport.requests import Request
+                                with open(sa_file, 'r', encoding='utf-8') as f:
+                                    sa = json.load(f)
+                                creds = service_account.Credentials.from_service_account_info(sa, scopes=['https://www.googleapis.com/auth/datastore'])
+                                creds.refresh(Request())
+                                token = creds.token
+                            except Exception:
+                                return []
+                            project = sa.get('project_id')
+                            if not project:
+                                return []
+                            base_url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/engage_accounts'
+                            headers = {'Authorization': f'Bearer {token}'}
+                            accounts = []
+                            page_token = None
+                            try:
+                                while True:
+                                    params = {'pageSize': 100}
+                                    if page_token:
+                                        params['pageToken'] = page_token
+                                    r = requests.get(base_url, headers=headers, params=params, timeout=10)
+                                    if r.status_code != 200:
+                                        break
+                                    data = r.json()
+                                    docs = data.get('documents', [])
+                                    for d in docs:
+                                        flds = d.get('fields', {})
+                                        an = flds.get('account_name', {}).get('stringValue')
+                                        eid = flds.get('engage_id', {}).get('stringValue')
+                                        epwd = flds.get('engage_password', {}).get('stringValue')
+                                        if an:
+                                            accounts.append({'account_name': an, 'engage_id': eid, 'engage_password': epwd})
+                                    page_token = data.get('nextPageToken')
+                                    if not page_token:
+                                        break
+                                return accounts
+                            except Exception:
+                                return accounts
+                        
+                        remote_accounts = get_engage_accounts(uid)
+                        match_account = None
+                        parsed_name = (parsed.get('account_name') or '').strip()
+                        
+                        def _norm(s: str) -> str:
+                            import re
+                            if not s:
+                                return ''
+                            t = unicodedata.normalize('NFKC', s)
+                            t = re.sub(r"\s+", '', t)
+                            try:
+                                t = t.lower()
+                            except Exception:
+                                pass
+                            return t
+                        
+                        parsed_norm = _norm(parsed_name)
+                        
+                        # 精确匹配账号名
+                        for ra in remote_accounts:
+                            ra_name = ra.get('account_name') or ''
+                            ra_norm = _norm(ra_name)
+                            if ra_norm and ra_norm == parsed_norm:
+                                match_account = ra
+                                break
+                        
+                        if not match_account:
+                            print(f"メール内のアカウント名 '{parsed_name}' は engage_accounts に見つかりませんでした。自動ログインをスキップします。")
+                            print('=' * 50)
+                            continue
+                        
+                        # エンゲージ自動ログイン処理（完全な異常捕获，不会闪退）
+                        engage = None
+                        try:
+                            # print('[エンゲージ] ===== RPA処理を開始します =====')
+                            try:
+                                from engage_login import EngageLogin
+                                # print('[エンゲージ] ✓ EngageLoginモジュールを読み込みました')
+                            except Exception as import_err:
+                                print(f'[エンゲージ] ❌ EngageLogin読み込みエラー: {import_err}')
+                                print('  `src/engage_login.py` を確認してください。')
+                                print('  処理をスキップして次のメールに進みます。')
+                                print('=' * 50)
+                                continue
+                            
+                            try:
+                                # print(f'[エンゲージ] EngageLoginを初期化します...')
+                                # print(f'  アカウント名: {match_account.get("account_name")}')
+                                # print(f'  ID: {match_account.get("engage_id")}')
+                                # print(f'  URL: {parsed.get("url")}')
+                                
+                                try:
+                                    engage = EngageLogin(match_account)
+                                    # print('[エンゲージ] ✓ ブラウザ初期化成功')
+                                except Exception as init_err:
+                                    print(f'[エンゲージ] ❌ ブラウザ初期化エラー: {init_err}')
+                                    print('  ChromeDriverが正しくインストールされているか確認してください。')
+                                    import traceback
+                                    traceback.print_exc()
+                                    print('  処理をスキップして次のメールに進みます。')
+                                    print('=' * 50)
+                                    continue
+                                
+                                # print('[エンゲージ] login_and_goto()を呼び出します...')
+                                try:
+                                    # メールから取得した職種名を渡す
+                                    info = engage.login_and_goto(parsed.get('url'), parsed.get('job_title', ''))
+                                    # print(f'[エンゲージ] ✓ login_and_goto()完了: {type(info)}')
+                                except Exception as login_err:
+                                    print(f'[エンゲージ] ❌ ログイン処理エラー: {login_err}')
+                                    import traceback
+                                    traceback.print_exc()
+                                    print('  処理をスキップして次のメールに進みます。')
+                                    try:
+                                        if engage:
+                                            engage.close()
+                                            # print('[エンゲージ] ブラウザを閉じました')
+                                    except:
+                                        pass
+                                    print('=' * 50)
+                                    continue
+                                
+                                if info and isinstance(info, dict) and info.get('detail'):
+                                    detail = info.get('detail') or {}
+                                    
+                                    # 応募Noを追加（URLから取得）
+                                    if not detail.get('oubo_no') and parsed.get('oubo_no'):
+                                        detail['oubo_no'] = parsed.get('oubo_no')
+                                        detail['応募No'] = parsed.get('oubo_no')
+                                    
+                                    # アカウント名と求人タイトルを追加
+                                    detail['account_name'] = parsed.get('account_name')
+                                    # 職種名はlogin_and_goto()で既に設定済み（メールから取得）
+                                    detail['job_title'] = info.get('title', '') or parsed.get('job_title', '')
+                                    detail['employer_name'] = parsed.get('employer_name')
+                                    detail['company'] = parsed.get('account_name')
+                                    
+                                    # 年齢を計算（まだ取得できていない場合）
+                                    if 'age' not in detail or not detail.get('age'):
+                                        birth_str = detail.get('birth', '') or ''
+                                        if birth_str:
+                                            try:
+                                                parsed_age = calc_age_from_birth_str(birth_str)
+                                                if parsed_age is not None:
+                                                    detail['age'] = parsed_age
+                                            except Exception:
+                                                pass
+                                    
+                                    # エンゲージのsegment配置を読取
+                                    segments = _get_engage_target_segments(uid)
+                                    if not segments:
+                                        print('エンゲージのセグメント設定が見つかりません')
+                                        # 履歴に記録（対象外として）
+                                        try:
+                                            rec = {
+                                                'name': detail.get('name'),
+                                                'furigana': detail.get('furigana', ''),
+                                                'gender': detail.get('gender'),
+                                                'birth': detail.get('birth'),
+                                                'age': detail.get('age'),
+                                                'email': detail.get('email'),
+                                                'tel': detail.get('tel'),
+                                                'addr': detail.get('addr'),
+                                                'oubo_no': detail.get('oubo_no'),
+                                                'source': 'engage',
+                                                'platform': 'エンゲージ',
+                                                'status': '対象外',
+                                                'response': {'note': 'セグメント設定なし'},
+                                                'sentAt': int(time.time())
+                                            }
+                                            write_sms_history(str(uid), rec)
+                                        except Exception:
+                                            pass
+                                    else:
+                                        # セグメントマッチング
+                                        matching_segment = _find_matching_segment(detail, segments)
+                                        
+                                        if matching_segment:
+                                            print(f'✓ セグメント「{matching_segment["title"]}」に該当します（エンゲージ）')
+                                            
+                                            # ===== SMS/Mail送信処理（求人ボックスと同じロジックを使用）=====
+                                            # エンゲージ専用のmail_settingsを読み込む
+                                            engage_mail_settings = _get_engage_mail_settings(uid)
+                                            
+                                            # SMS/Mail送信フラグ
+                                            sms_attempted = False
+                                            sms_ok = False
+                                            sms_info = {}
+                                            mail_attempted = False
+                                            mail_ok = False
+                                            mail_info = {}
+                                            
+                                            # SMS/Mailが両方有効かチェック
+                                            needs_combined_status = False
+                                            try:
+                                                tel = detail.get('tel') or detail.get('電話番号') or ''
+                                                sms_action = matching_segment['actions']['sms']
+                                                tpl = sms_action['text'] if sms_action.get('enabled') else None
+                                                will_attempt_sms = bool(tel and tpl and sms_action.get('enabled'))
+                                            except Exception:
+                                                will_attempt_sms = False
+                                            
+                                            try:
+                                                mail_action = matching_segment['actions']['mail']
+                                                to_email = detail.get('email', '').strip()
+                                                will_attempt_mail = bool(mail_action.get('enabled') and mail_action.get('subject') and mail_action.get('body') and to_email)
+                                            except Exception:
+                                                will_attempt_mail = False
+                                            
+                                            needs_combined_status = will_attempt_sms and will_attempt_mail
+                                            
+                                            # ===== SMS送信処理 =====
+                                            if matching_segment:
+                                                # API設定を取得（求人ボックスと同じAPIを使用）
+                                                api_settings = get_api_settings(uid)
+                                                provider = (api_settings.get('provider') or 'sms_publisher')
+                                                
+                                                # エンゲージ流程中使用模块级别的SMS发送函数
+                                                tel = detail.get('tel') or detail.get('電話番号') or ''
+                                                
+                                                # セグメントのSMS設定を使用
+                                                sms_action = matching_segment['actions']['sms']
+                                                tpl = sms_action['text'] if sms_action['enabled'] else None
+                                                sms_send_mode = sms_action.get('sendMode', 'immediate')
+                                                sms_scheduled_time = sms_action.get('scheduledTime', '09:00')
+                                                sms_delay_minutes = sms_action.get('delayMinutes', 30)
+                                                
+                                                if tel and tpl and matching_segment and sms_action['enabled']:
+                                                    norm, ok, reason = normalize_phone_number(tel)
+                                                    dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
+                                                    
+                                                    if not ok:
+                                                        print(f'電話番号の検証に失敗: {tel} -> {norm} 理由: {reason}')
+                                                        if not dry_run_env and uid:
+                                                            try:
+                                                                rec = {
+                                                                    'name': detail.get('name'),
+                                                                    'furigana': detail.get('furigana', ''),
+                                                                    'gender': detail.get('gender'),
+                                                                    'birth': detail.get('birth'),
+                                                                    'age': detail.get('age'),
+                                                                    'email': detail.get('email'),
+                                                                    'tel': norm,
+                                                                    'addr': detail.get('addr'),
+                                                                    'school': detail.get('school'),
+                                                                    'oubo_no': detail.get('oubo_no'),
+                                                                    'source': 'engage',
+                                                                    'platform': 'エンゲージ',
+                                                                    'status': '送信失敗',
+                                                                    'response': {'note': f'invalid phone: {reason}'},
+                                                                    'sentAt': int(time.time())
+                                                                }
+                                                                write_sms_history(str(uid), rec)
+                                                            except Exception as e:
+                                                                print(f'履歴記録エラー: {e}')
+                                                    
+                                                    elif sms_send_mode == 'scheduled':
+                                                        # 定時送信
+                                                        print(f'SMS時刻送信を設定します: {sms_scheduled_time}')
+                                                        try:
+                                                            company_val = detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
+                                                            employer_val = detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or company_val
+                                                            jt = detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle') or ''
+                                                            
+                                                            applicant_detail_for_task = {
+                                                                'name': detail.get('name'),
+                                                                'applicant_name': detail.get('name'),
+                                                                'job_title': jt,
+                                                                'company': company_val,
+                                                                'account_name': company_val,
+                                                                'employer_name': employer_val,
+                                                                'employer': employer_val,
+                                                                '会社名': employer_val,
+                                                                'gender': detail.get('gender'),
+                                                                'birth': detail.get('birth'),
+                                                                'age': detail.get('age'),
+                                                                'email': detail.get('email'),
+                                                                'tel': detail.get('tel'),
+                                                                'addr': detail.get('addr'),
+                                                                'school': detail.get('school'),
+                                                            }
+                                                        except Exception as e:
+                                                            print(f'[SMS時刻] applicant_detail構築エラー: {e}')
+                                                            applicant_detail_for_task = {}
+                                                        
+                                                        task_ok = create_scheduled_task(
+                                                            uid=str(uid),
+                                                            task_type='sms',
+                                                            task_data={
+                                                                'scheduledTime': sms_scheduled_time,
+                                                                'to': norm,
+                                                                'template': tpl,
+                                                                'applicant_detail': applicant_detail_for_task,
+                                                                'segment_id': matching_segment.get('id', ''),
+                                                                'oubo_no': detail.get('oubo_no') or '',
+                                                            }
+                                                        )
+                                                        if task_ok:
+                                                            print(f'SMS時刻送信タスク作成成功: {sms_scheduled_time}')
+                                                        else:
+                                                            print('SMS時刻送信タスク作成失敗')
+                                                    
+                                                    elif sms_send_mode == 'delayed':
+                                                        # 延迟送信
+                                                        print(f'SMS予約送信を設定します: {sms_delay_minutes}分後')
+                                                        from datetime import datetime, timedelta
+                                                        next_run_dt = datetime.now() + timedelta(minutes=sms_delay_minutes)
+                                                        next_run_timestamp = int(next_run_dt.timestamp())
+                                                        
+                                                        try:
+                                                            company_val = detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
+                                                            employer_val = detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or company_val
+                                                            jt = detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle') or ''
+                                                            
+                                                            applicant_detail_for_task = {
+                                                                'name': detail.get('name'),
+                                                                'applicant_name': detail.get('name'),
+                                                                'job_title': jt,
+                                                                'company': company_val,
+                                                                'account_name': company_val,
+                                                                'employer_name': employer_val,
+                                                                'employer': employer_val,
+                                                                '会社名': employer_val,
+                                                                'gender': detail.get('gender'),
+                                                                'birth': detail.get('birth'),
+                                                                'age': detail.get('age'),
+                                                                'email': detail.get('email'),
+                                                                'tel': detail.get('tel'),
+                                                                'addr': detail.get('addr'),
+                                                                'school': detail.get('school'),
+                                                            }
+                                                        except Exception as e:
+                                                            print(f'[SMS予約] applicant_detail構築エラー: {e}')
+                                                            applicant_detail_for_task = {}
+                                                        
+                                                        task_ok = create_delayed_task(
+                                                            uid=str(uid),
+                                                            task_type='sms',
+                                                            next_run=next_run_timestamp,
+                                                            task_data={
+                                                                'delayMinutes': sms_delay_minutes,
+                                                                'to': norm,
+                                                                'template': tpl,
+                                                                'applicant_detail': applicant_detail_for_task,
+                                                                'segment_id': matching_segment.get('id', ''),
+                                                                'oubo_no': detail.get('oubo_no') or '',
+                                                            }
+                                                        )
+                                                        if task_ok:
+                                                            print(f'SMS予約送信タスク作成成功: {sms_delay_minutes}分後 ({next_run_dt.strftime("%Y-%m-%d %H:%M:%S")})')
+                                                        else:
+                                                            print('SMS予約送信タスク作成失敗')
+                                                    
+                                                    else:
+                                                        # 即時送信
+                                                        try:
+                                                            company_val = detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
+                                                            employer_val = detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or company_val
+                                                            jt = detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle') or ''
+                                                            
+                                                            sms_data = {
+                                                                'applicant_name': detail.get('name'),
+                                                                'job_title': jt,
+                                                                'company': company_val,
+                                                                'account_name': company_val,
+                                                                'employer_name': employer_val,
+                                                                'employer': employer_val,
+                                                                '会社名': employer_val,
+                                                            }
+                                                        except Exception:
+                                                            sms_data = {}
+                                                        
+                                                        try:
+                                                            tpl_to_send = apply_template_tokens(tpl, sms_data)
+                                                        except Exception:
+                                                            tpl_to_send = tpl
+                                                        
+                                                        success, info = send_sms_router(norm, tpl_to_send, provider, api_settings)
+                                                        sms_attempted = True
+                                                        sms_ok = success
+                                                        sms_info = info
+                                                        
+                                                        # 显示SMS发送结果
+                                                        if success:
+                                                            print(f'✅ SMS送信完了')
+                                                        else:
+                                                            print(f'❌ SMS送信失敗')
+                                                        
+                                                        # 単独SMS送信の場合は即座に履歴記録
+                                                        if not needs_combined_status and not dry_run_env and uid:
+                                                            try:
+                                                                rec_status = '送信済（S）' if success else '送信失敗（S）'
+                                                                rec = {
+                                                                    'name': detail.get('name'),
+                                                                    'furigana': detail.get('furigana', ''),
+                                                                    'gender': detail.get('gender'),
+                                                                    'birth': detail.get('birth'),
+                                                                    'age': detail.get('age'),
+                                                                    'email': detail.get('email'),
+                                                                    'tel': norm,
+                                                                    'addr': detail.get('addr'),
+                                                                    'school': detail.get('school'),
+                                                                    'oubo_no': detail.get('oubo_no'),
+                                                                    'source': 'engage',
+                                                                    'platform': 'エンゲージ',
+                                                                    'segment_title': matching_segment.get('title'),
+                                                                    'status': rec_status,
+                                                                    'response': info if isinstance(info, dict) else {'note': str(info)},
+                                                                    'sentAt': int(time.time())
+                                                                }
+                                                                write_sms_history(str(uid), rec)
+                                                            except Exception as e:
+                                                                print(f'SMS履歴記録エラー: {e}')
+                                            
+                                            # ===== Mail送信処理 =====
+                                            if matching_segment:
+                                                try:
+                                                    mail_action = matching_segment['actions']['mail']
+                                                    to_email = detail.get('email', '').strip()
+                                                    
+                                                    if mail_action.get('enabled') and mail_action.get('subject') and mail_action.get('body') and to_email:
+                                                        mail_send_mode = mail_action.get('sendMode', 'immediate')
+                                                        mail_scheduled_time = mail_action.get('scheduledTime', '09:00')
+                                                        mail_delay_minutes = mail_action.get('delayMinutes', 30)
+                                                        
+                                                        # エンゲージ専用のmail_settings取得
+                                                        sender = engage_mail_settings.get('email')
+                                                        sender_pass = engage_mail_settings.get('appPass')
+                                                        
+                                                        if not sender or not sender_pass:
+                                                            print('メール送信元の設定が見つかりません（engage_mail_settings）')
+                                                        else:
+                                                            if mail_send_mode == 'scheduled':
+                                                                # 定時送信
+                                                                print(f'メール時刻送信を設定します: {mail_scheduled_time}')
+                                                                try:
+                                                                    company_val = detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
+                                                                    employer_val = detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or company_val
+                                                                    jt = detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle') or ''
+                                                                    
+                                                                    applicant_detail_for_task = {
+                                                                        'name': detail.get('name'),
+                                                                        'applicant_name': detail.get('name'),
+                                                                        'job_title': jt,
+                                                                        'company': company_val,
+                                                                        'account_name': company_val,
+                                                                        'employer_name': employer_val,
+                                                                        'employer': employer_val,
+                                                                        '会社名': employer_val,
+                                                                        'gender': detail.get('gender'),
+                                                                        'birth': detail.get('birth'),
+                                                                        'age': detail.get('age'),
+                                                                        'email': detail.get('email'),
+                                                                        'tel': detail.get('tel'),
+                                                                        'addr': detail.get('addr'),
+                                                                        'school': detail.get('school'),
+                                                                    }
+                                                                except Exception as e:
+                                                                    print(f'[メール時刻] applicant_detail構築エラー: {e}')
+                                                                    applicant_detail_for_task = {}
+                                                                
+                                                                task_ok = create_scheduled_task(
+                                                                    uid=str(uid),
+                                                                    task_type='mail',
+                                                                    task_data={
+                                                                        'scheduledTime': mail_scheduled_time,
+                                                                        'to': to_email,
+                                                                        'template': mail_action.get('body'),
+                                                                        'subject': mail_action.get('subject'),
+                                                                        'applicant_detail': applicant_detail_for_task,
+                                                                        'segment_id': matching_segment.get('id', ''),
+                                                                        'oubo_no': detail.get('oubo_no') or '',
+                                                                    }
+                                                                )
+                                                                if task_ok:
+                                                                    print(f'メール時刻送信タスク作成成功: {mail_scheduled_time}')
+                                                                else:
+                                                                    print('メール時刻送信タスク作成失敗')
+                                                            
+                                                            elif mail_send_mode == 'delayed':
+                                                                # 延迟送信
+                                                                print(f'メール予約送信を設定します: {mail_delay_minutes}分後')
+                                                                from datetime import datetime, timedelta
+                                                                next_run_dt = datetime.now() + timedelta(minutes=mail_delay_minutes)
+                                                                next_run_timestamp = int(next_run_dt.timestamp())
+                                                                
+                                                                try:
+                                                                    company_val = detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
+                                                                    employer_val = detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or company_val
+                                                                    jt = detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle') or ''
+                                                                    
+                                                                    applicant_detail_for_task = {
+                                                                        'name': detail.get('name'),
+                                                                        'applicant_name': detail.get('name'),
+                                                                        'job_title': jt,
+                                                                        'company': company_val,
+                                                                        'account_name': company_val,
+                                                                        'employer_name': employer_val,
+                                                                        'employer': employer_val,
+                                                                        '会社名': employer_val,
+                                                                        'gender': detail.get('gender'),
+                                                                        'birth': detail.get('birth'),
+                                                                        'age': detail.get('age'),
+                                                                        'email': detail.get('email'),
+                                                                        'tel': detail.get('tel'),
+                                                                        'addr': detail.get('addr'),
+                                                                        'school': detail.get('school'),
+                                                                    }
+                                                                except Exception as e:
+                                                                    print(f'[メール予約] applicant_detail構築エラー: {e}')
+                                                                    applicant_detail_for_task = {}
+                                                                
+                                                                task_ok = create_delayed_task(
+                                                                    uid=str(uid),
+                                                                    task_type='mail',
+                                                                    next_run=next_run_timestamp,
+                                                                    task_data={
+                                                                        'delayMinutes': mail_delay_minutes,
+                                                                        'to': to_email,
+                                                                        'template': mail_action.get('body'),
+                                                                        'subject': mail_action.get('subject'),
+                                                                        'applicant_detail': applicant_detail_for_task,
+                                                                        'segment_id': matching_segment.get('id', ''),
+                                                                        'oubo_no': detail.get('oubo_no') or '',
+                                                                    }
+                                                                )
+                                                                if task_ok:
+                                                                    print(f'メール予約送信タスク作成成功: {mail_delay_minutes}分後 ({next_run_dt.strftime("%Y-%m-%d %H:%M:%S")})')
+                                                                else:
+                                                                    print('メール予約送信タスク作成失敗')
+                                                            
+                                                            else:
+                                                                # 即時送信
+                                                                try:
+                                                                    company_val = detail.get('account_name') or detail.get('アカウント名') or detail.get('company')
+                                                                    employer_val = detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or company_val
+                                                                    jt = detail.get('job_title') or detail.get('求人タイトル') or detail.get('jobTitle') or ''
+                                                                    
+                                                                    mail_data = {
+                                                                        'applicant_name': detail.get('name'),
+                                                                        'job_title': jt,
+                                                                        'company': company_val,
+                                                                        'account_name': company_val,
+                                                                        'employer_name': employer_val,
+                                                                        'employer': employer_val,
+                                                                        '会社名': employer_val,
+                                                                    }
+                                                                except Exception:
+                                                                    mail_data = {}
+                                                                
+                                                                try:
+                                                                    subj_to_send = apply_template_tokens(mail_action.get('subject'), mail_data)
+                                                                    body_to_send = apply_template_tokens(mail_action.get('body'), mail_data)
+                                                                except Exception:
+                                                                    subj_to_send = mail_action.get('subject')
+                                                                    body_to_send = mail_action.get('body')
+                                                                
+                                                                dry_run_mail = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
+                                                                if dry_run_mail:
+                                                                    print(f"[DRY_RUN_MAIL] would send to {to_email}: {subj_to_send}")
+                                                                    mail_attempted = True
+                                                                    mail_ok = True
+                                                                    mail_info = {'note': 'dry_run'}
+                                                                else:
+                                                                    ok_mail, info_mail = send_mail_once(sender, sender_pass, to_email, subj_to_send, body_to_send)
+                                                                    mail_attempted = True
+                                                                    mail_ok = ok_mail
+                                                                    mail_info = info_mail
+                                                                    
+                                                                    # 显示Mail发送结果
+                                                                    if ok_mail:
+                                                                        print(f'✅ MAIL送信完了')
+                                                                    else:
+                                                                        print(f'❌ MAIL送信失敗')
+                                                                
+                                                                # 単独メール送信の場合は即座に履歴記録
+                                                                if not needs_combined_status and not dry_run_mail and uid:
+                                                                    try:
+                                                                        rec_status = '送信済（M）' if mail_ok else '送信失敗（M）'
+                                                                        rec = {
+                                                                            'name': detail.get('name'),
+                                                                            'furigana': detail.get('furigana', ''),
+                                                                            'gender': detail.get('gender'),
+                                                                            'birth': detail.get('birth'),
+                                                                            'age': detail.get('age'),
+                                                                            'email': to_email,
+                                                                            'tel': detail.get('tel'),
+                                                                            'addr': detail.get('addr'),
+                                                                            'school': detail.get('school'),
+                                                                            'oubo_no': detail.get('oubo_no'),
+                                                                            'source': 'engage',
+                                                                            'platform': 'エンゲージ',
+                                                                            'segment_title': matching_segment.get('title'),
+                                                                            'status': rec_status,
+                                                                            'response': mail_info if isinstance(mail_info, dict) else {'note': str(mail_info)},
+                                                                            'sentAt': int(time.time())
+                                                                        }
+                                                                        write_sms_history(str(uid), rec)
+                                                                    except Exception as e:
+                                                                        print(f'メール履歴記録エラー: {e}')
+                                                
+                                                except Exception as e:
+                                                    print(f'メール送信エラー: {e}')
+                                            
+                                            # SMS+Mail両方試行した場合の統合履歴記録
+                                            if needs_combined_status and (sms_attempted or mail_attempted):
+                                                dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
+                                                dry_run_mail = os.environ.get('DRY_RUN_MAIL', 'false').lower() in ('1', 'true', 'yes')
+                                                
+                                                if not (dry_run_env and dry_run_mail) and uid:
+                                                    try:
+                                                        # 統合ステータス決定
+                                                        if sms_ok and mail_ok:
+                                                            combined_status = '送信済（M+S）'
+                                                        elif sms_ok and not mail_ok:
+                                                            combined_status = '送信済（S）'
+                                                        elif not sms_ok and mail_ok:
+                                                            combined_status = '送信済（M）'
+                                                        else:
+                                                            combined_status = '送信失敗（M+S）'
+                                                        
+                                                        combined_response = {
+                                                            'sms': sms_info if isinstance(sms_info, dict) else {'note': str(sms_info)},
+                                                            'mail': mail_info if isinstance(mail_info, dict) else {'note': str(mail_info)}
+                                                        }
+                                                        
+                                                        rec = {
+                                                            'name': detail.get('name'),
+                                                            'furigana': detail.get('furigana', ''),
+                                                            'gender': detail.get('gender'),
+                                                            'birth': detail.get('birth'),
+                                                            'age': detail.get('age'),
+                                                            'email': detail.get('email'),
+                                                            'tel': detail.get('tel'),
+                                                            'addr': detail.get('addr'),
+                                                            'school': detail.get('school'),
+                                                            'oubo_no': detail.get('oubo_no'),
+                                                            'source': 'engage',
+                                                            'platform': 'エンゲージ',
+                                                            'segment_title': matching_segment.get('title'),
+                                                            'status': combined_status,
+                                                            'response': combined_response,
+                                                            'sentAt': int(time.time())
+                                                        }
+                                                        write_sms_history(str(uid), rec)
+                                                        print(f'✓ 統合履歴記録: {combined_status}')
+                                                    except Exception as e:
+                                                        print(f'統合履歴記録エラー: {e}')
+                                        
+                                        else:
+                                            print('× セグメント条件に該当しません（エンゲージ）')
+                                            # 対象外として記録
+                                            try:
+                                                rec = {
+                                                    'name': detail.get('name'),
+                                                    'furigana': detail.get('furigana', ''),
+                                                    'gender': detail.get('gender'),
+                                                    'birth': detail.get('birth'),
+                                                    'age': detail.get('age'),
+                                                    'email': detail.get('email'),
+                                                    'tel': detail.get('tel'),
+                                                    'addr': detail.get('addr'),
+                                                    'oubo_no': detail.get('oubo_no'),
+                                                    'source': 'engage',
+                                                    'platform': 'エンゲージ',
+                                                    'status': '対象外',
+                                                    'response': {'note': 'セグメント条件不一致'},
+                                                    'sentAt': int(time.time())
+                                                }
+                                                write_sms_history(str(uid), rec)
+                                            except Exception:
+                                                pass
+                                
+                                print('[エンゲージ] ブラウザを閉じます...')
+                                try:
+                                    engage.close()
+                                    print('[エンゲージ] ✓ ブラウザ終了完了')
+                                except Exception as close_err:
+                                    print(f'[エンゲージ] ⚠️  ブラウザ終了エラー: {close_err}')
+                                
+                                print('[エンゲージ] ===== RPA処理完了 =====')
+                                
+                            except Exception as e:
+                                print('=' * 60)
+                                print('[エンゲージ] ❌ 処理中に例外が発生しました')
+                                print('=' * 60)
+                                print(f'エラータイプ: {type(e).__name__}')
+                                print(f'エラー内容: {e}')
+                                print('-' * 60)
+                                import traceback
+                                traceback.print_exc()
+                                print('=' * 60)
+                                print('⚠️  エラーが発生しましたが、プログラムは継続します。')
+                                print('次のメール処理に進みます...')
+                                # 确保浏览器关闭
+                                try:
+                                    if engage:
+                                        engage.close()
+                                        print('[エンゲージ] ブラウザを閉じました')
+                                except Exception:
+                                    pass
+                        
+                        except Exception as outer_err:
+                            print('=' * 60)
+                            print('[エンゲージ] ❌ 予期しないエラーが発生しました')
+                            print('=' * 60)
+                            print(f'エラータイプ: {type(outer_err).__name__}')
+                            print(f'エラー内容: {outer_err}')
+                            import traceback
+                            traceback.print_exc()
+                            print('=' * 60)
+                            print('⚠️  プログラムは継続します。')
+                            # 最后的保险措施
+                            try:
+                                if engage:
+                                    engage.close()
+                            except:
+                                pass
+                    
+                    print('=' * 50)
+                
                 else:
-                    # 非求人ボックス邮件，保持未读（不 fetch full body），不标记
+                    # 非求人ボックス・非エンゲージ邮件，保持未读（不 fetch full body），不标记
                     pass
             time.sleep(poll_seconds)
     except KeyboardInterrupt:
@@ -3598,45 +4650,86 @@ def main():
         url = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/mail_settings/settings'
         import requests
         headers = {'Authorization': f'Bearer {token}'}
+        res = {}
         try:
+            # 1. Fetch Jobbox settings (mail_settings)
             r = requests.get(url, headers=headers, timeout=10)
-            if r.status_code != 200:
-                return {}
-            data = r.json()
-            fields = data.get('fields', {})
-            res = {}
-            if 'email' in fields:
-                res['email'] = fields['email'].get('stringValue')
-            if 'appPass' in fields:
-                res['appPass'] = fields['appPass'].get('stringValue')
+            if r.status_code == 200:
+                data = r.json()
+                fields = data.get('fields', {})
+                if 'email' in fields:
+                    res['email'] = fields['email'].get('stringValue')
+                if 'appPass' in fields:
+                    res['appPass'] = fields['appPass'].get('stringValue')
+            
+            # 2. Fetch Engage settings (engage_mail_settings)
+            url_engage = f'https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/accounts/{uid}/engage_mail_settings/settings'
+            r_engage = requests.get(url_engage, headers=headers, timeout=10)
+            if r_engage.status_code == 200:
+                data_engage = r_engage.json()
+                fields_engage = data_engage.get('fields', {})
+                if 'email' in fields_engage:
+                    res['engageEmail'] = fields_engage['email'].get('stringValue')
+                if 'appPass' in fields_engage:
+                    res['engageAppPass'] = fields_engage['appPass'].get('stringValue')
+                print(f"[DEBUG] Loaded Engage settings: {res.get('engageEmail')}")
+            else:
+                print(f"[DEBUG] Engage settings not found (status: {r_engage.status_code})")
+            
             return res
-        except Exception:
-            return {}
+        except Exception as e:
+            print(f"[DEBUG] Error loading settings: {e}")
+            return res
 
-    settings = get_mail_settings(uid)
-    email_user = settings.get('email')
-    if not email_user:
-        email_user = prompt_input('監視するメールアドレスを入力してください')
-    # 16桁アプリパスワード：環境変数（EMAIL_WATCHER_PASS）を優先、なければ可視入力で取得
+    settings = get_mail_settings(uid) or {}
+    
+    # 監視対象リストを作成
+    monitor_targets = []
+
+    # 1. 求人ボックス用メール（mail_settings）
+    jobbox_user = settings.get('email')
+    jobbox_pass = settings.get('appPass')
     env_pass = os.environ.get('EMAIL_WATCHER_PASS')
     if env_pass and len(env_pass) == 16:
-        email_pass = env_pass
+        jobbox_pass = env_pass
+
+    if jobbox_user and jobbox_pass:
+        monitor_targets.append({
+            'host': 'imap.gmail.com',
+            'user': jobbox_user,
+            'pass': jobbox_pass,
+            'label': 'Jobbox',
+            'category': 'jobbox'
+        })
     else:
-        # 尝试从云端读取 appPass
-        cloud_app_pass = settings.get('appPass') if settings else None
-        if cloud_app_pass and len(cloud_app_pass) == 16:
-            email_pass = cloud_app_pass
-        else:
-            while True:
-                try:
-                    # 明示的可视入力（保留原行为）
-                    email_pass = input('16桁のアプリパスワードを入力してください: ').strip()
-                except Exception:
-                    email_pass = input('16桁のアプリパスワードを入力してください: ').strip()
-                if len(email_pass) == 16:
-                    break
-                print('16桁のアプリパスワードを正しく入力してください')
-    # 直接使用默认 IMAP サーバー，不再要求手动确认
+        print("-" * 40)
+        print("求人ボックス用メール設定が不足しています。")
+        print(f"accounts/{uid}/mail_settings/settings に email と appPass を登録してください。")
+        print("-" * 40)
+    
+    # 2. エンゲージ用メール（engage_mail_settings）
+    engage_user = settings.get('engageEmail')
+    engage_pass = settings.get('engageAppPass')
+    
+    if engage_user and engage_pass:
+        monitor_targets.append({
+            'host': 'imap.gmail.com',
+            'user': engage_user,
+            'pass': engage_pass,
+            'label': 'Engage',
+            'category': 'engage'
+        })
+    else:
+        print("-" * 40)
+        print("エンゲージ用メール設定が見つかりませんでした。")
+        print(f"accounts/{uid}/engage_mail_settings/settings に engageEmail と engageAppPass を設定してください。")
+        print("-" * 40)
+
+    if not monitor_targets:
+        print('メール監視対象がありません。Firestoreの設定を確認してから再実行してください。')
+        return
+
+    # 共通設定
     imap_host = 'imap.gmail.com'
     
     # 如果命令行提供了 interval，使用它；否则交互式输入
@@ -3650,7 +4743,31 @@ def main():
         except Exception:
             poll_seconds = 30
     
-    watch_mail(imap_host, email_user, email_pass, uid=uid, poll_seconds=poll_seconds)
+    # 启动定时任务后台线程 (UID単位で1つだけ)
+    stop_event = threading.Event()
+    if uid:
+        task_thread = threading.Thread(target=scheduled_task_worker, args=(uid, stop_event), daemon=True)
+        task_thread.start()
+        print(f"スケジュール送信タスクを開始しました (UID: {uid})")
+
+    # 各アカウントの監視スレッドを起動
+    threads = []
+    for target in monitor_targets:
+        t = threading.Thread(
+            target=watch_mail, 
+            args=(target['host'], target['user'], target['pass'], uid, 'INBOX', poll_seconds, target['label'], target.get('category', 'auto'))
+        )
+        t.daemon = True
+        t.start()
+        threads.append(t)
+        print(f"監視スレッド起動: {target['label']} ({target['user']})")
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print('\nRPAを停止しました。終了します')
+
 
 
 def send_sms_once(uid, to_number, template_type=None, live=False):
@@ -3878,4 +4995,33 @@ def send_sms_once(uid, to_number, template_type=None, live=False):
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print("\n" + "="*60)
+        print("❌ 予期せぬエラーが発生しました (Fatal Error)")
+        print("="*60)
+        print(f"エラー内容: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # エラーログをファイルに保存
+        try:
+            log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            log_file = os.path.join(log_dir, f'crash_{int(time.time())}.log')
+            with open(log_file, 'w', encoding='utf-8') as f:
+                f.write(f"Time: {datetime.datetime.now()}\n") # type: ignore
+                f.write(f"Error: {e}\n")
+                f.write(traceback.format_exc())
+            print(f"\nエラーログを保存しました: {log_file}")
+        except Exception:
+            pass
+            
+        print("="*60)
+    finally:
+        print("\nプログラムを終了するにはEnterキーを押してください...")
+        input()

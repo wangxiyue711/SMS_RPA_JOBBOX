@@ -162,7 +162,7 @@ export default function LoginPage() {
           <button onClick={handleForgot} className="link">
             パスワードをお忘れですか？
           </button>
-        </div>
+        </div>                      
 
         {error && <p className="msg error">{error}</p>}
         {message && <p className="msg ok">{message}</p>}

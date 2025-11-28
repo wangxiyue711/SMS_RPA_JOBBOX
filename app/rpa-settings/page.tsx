@@ -18,11 +18,25 @@ type AccountRow = {
   jobbox_password: string;
 };
 
+type EngageAccountRow = {
+  account_name: string;
+  engage_id: string;
+  engage_password: string;
+};
+
+type SiteType = "jobbox" | "engage";
+
 export default function RPASettingsPage() {
+  const [siteType, setSiteType] = useState<SiteType>("jobbox");
   const [formData, setFormData] = useState<AccountRow>({
     account_name: "",
     jobbox_id: "",
     jobbox_password: "",
+  });
+  const [engageFormData, setEngageFormData] = useState<EngageAccountRow>({
+    account_name: "",
+    engage_id: "",
+    engage_password: "",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -58,13 +72,23 @@ export default function RPASettingsPage() {
       if (!auth || !auth.currentUser) return;
       const uid = auth.currentUser.uid;
       const db = getFirestore();
+      const collectionName =
+        siteType === "jobbox" ? "jobbox_accounts" : "engage_accounts";
+      console.log(
+        `Loading accounts from: ${collectionName}, siteType: ${siteType}`
+      );
       const snap = await getDocs(
-        collection(db, "accounts", uid, "jobbox_accounts")
+        collection(db, "accounts", uid, collectionName)
       );
       const list: any[] = [];
-      snap.forEach((d) =>
-        list.push({ id: d.id, ...d.data(), jobbox_password_hidden: true })
-      );
+      snap.forEach((d) => {
+        const passwordField =
+          siteType === "jobbox"
+            ? "jobbox_password_hidden"
+            : "engage_password_hidden";
+        list.push({ id: d.id, ...d.data(), [passwordField]: true });
+      });
+      console.log(`Loaded ${list.length} accounts:`, list);
       setSaved(list);
     } catch (e) {
       console.error(e);
@@ -72,8 +96,10 @@ export default function RPASettingsPage() {
   };
 
   useEffect(() => {
+    // 立即清空列表,然后重新加载
+    setSaved([]);
     loadSaved();
-  }, []);
+  }, [siteType]);
 
   // wait for auth to be ready (useful if auth is initializing)
   const waitForAuthReady = async (timeout = 4000) => {
@@ -107,18 +133,40 @@ export default function RPASettingsPage() {
       const authUser: any = await waitForAuthReady();
       if (!authUser) throw new Error("ログインしてください");
       const uid = authUser.uid;
-      console.log("Saving accounts for uid=", uid);
+      console.log("Saving accounts for uid=", uid, "siteType=", siteType);
       const db = getFirestore();
-      const valid = rows.filter(
-        (r) => r.account_name && r.jobbox_id && r.jobbox_password
-      );
-      if (valid.length === 0) throw new Error("入力してください");
-      await Promise.all(
-        valid.map((r) =>
-          addDoc(collection(db, "accounts", uid, "jobbox_accounts"), r)
-        )
-      );
-      setFormData({ account_name: "", jobbox_id: "", jobbox_password: "" });
+
+      if (siteType === "jobbox") {
+        const valid = rows.filter(
+          (r) => r.account_name && r.jobbox_id && r.jobbox_password
+        );
+        if (valid.length === 0) throw new Error("入力してください");
+        await Promise.all(
+          valid.map((r) =>
+            addDoc(collection(db, "accounts", uid, "jobbox_accounts"), r)
+          )
+        );
+        setFormData({ account_name: "", jobbox_id: "", jobbox_password: "" });
+      } else {
+        // engage
+        if (
+          !engageFormData.account_name ||
+          !engageFormData.engage_id ||
+          !engageFormData.engage_password
+        ) {
+          throw new Error("入力してください");
+        }
+        await addDoc(
+          collection(db, "accounts", uid, "engage_accounts"),
+          engageFormData
+        );
+        setEngageFormData({
+          account_name: "",
+          engage_id: "",
+          engage_password: "",
+        });
+      }
+
       await loadSaved();
       setSuccess("✅ 保存しました！");
       setTimeout(() => setSuccess(""), 3000);
@@ -137,7 +185,9 @@ export default function RPASettingsPage() {
       if (!auth || !auth.currentUser) return;
       const uid = auth.currentUser.uid;
       const db = getFirestore();
-      await deleteDoc(doc(db, "accounts", uid, "jobbox_accounts", id));
+      const collectionName =
+        siteType === "jobbox" ? "jobbox_accounts" : "engage_accounts";
+      await deleteDoc(doc(db, "accounts", uid, collectionName, id));
       await loadSaved();
     } catch (e: any) {
       console.error("delete error", e);
@@ -150,8 +200,57 @@ export default function RPASettingsPage() {
         アカウント設定
       </h2>
       <p style={{ marginBottom: 24 }}>
-        RoMeALLで使用する求人ボックスアカウントを登録 / 管理することができます。
+        RoMeALLで使用する求人サイトアカウントを登録 / 管理することができます。
       </p>
+
+      {/* Tab UI for Site Selection */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          marginBottom: 24,
+          borderBottom: "2px solid #e5e7eb",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setSiteType("jobbox")}
+          style={{
+            padding: "12px 24px",
+            fontWeight: 600,
+            background: "transparent",
+            border: "none",
+            borderBottom:
+              siteType === "jobbox"
+                ? "3px solid #36bdccff"
+                : "3px solid transparent",
+            color: siteType === "jobbox" ? "#36bdccff" : "#6b7280",
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          求人ボックス
+        </button>
+        <button
+          type="button"
+          onClick={() => setSiteType("engage")}
+          style={{
+            padding: "12px 24px",
+            fontWeight: 600,
+            background: "transparent",
+            border: "none",
+            borderBottom:
+              siteType === "engage"
+                ? "3px solid #36bdccff"
+                : "3px solid transparent",
+            color: siteType === "engage" ? "#36bdccff" : "#6b7280",
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          エンゲージ
+        </button>
+      </div>
 
       {/* 新規アカウント登録ブロック */}
       <div
@@ -192,13 +291,32 @@ export default function RPASettingsPage() {
                   fontWeight: 500,
                 }}
               >
-                求人ボックスアカウント名
+                {siteType === "jobbox"
+                  ? "求人ボックスアカウント名"
+                  : "エンゲージアカウント名"}
               </label>
               <input
-                name="jobbox_account_name"
+                name={
+                  siteType === "jobbox"
+                    ? "jobbox_account_name"
+                    : "engage_account_name"
+                }
                 autoComplete="off"
-                value={rows[0]?.account_name || ""}
-                onChange={(e) => updateRow(0, "account_name", e.target.value)}
+                value={
+                  siteType === "jobbox"
+                    ? rows[0]?.account_name || ""
+                    : engageFormData.account_name || ""
+                }
+                onChange={(e) => {
+                  if (siteType === "jobbox") {
+                    updateRow(0, "account_name", e.target.value);
+                  } else {
+                    setEngageFormData({
+                      ...engageFormData,
+                      account_name: e.target.value,
+                    });
+                  }
+                }}
                 placeholder="xxx株式会社"
                 required
                 className="input"
@@ -225,10 +343,23 @@ export default function RPASettingsPage() {
                   メールアドレス
                 </label>
                 <input
-                  name="jobbox_id"
+                  name={siteType === "jobbox" ? "jobbox_id" : "engage_id"}
                   autoComplete="off"
-                  value={rows[0]?.jobbox_id || ""}
-                  onChange={(e) => updateRow(0, "jobbox_id", e.target.value)}
+                  value={
+                    siteType === "jobbox"
+                      ? rows[0]?.jobbox_id || ""
+                      : engageFormData.engage_id || ""
+                  }
+                  onChange={(e) => {
+                    if (siteType === "jobbox") {
+                      updateRow(0, "jobbox_id", e.target.value);
+                    } else {
+                      setEngageFormData({
+                        ...engageFormData,
+                        engage_id: e.target.value,
+                      });
+                    }
+                  }}
                   placeholder="sample@sample-job.biz"
                   required
                   className="input"
@@ -249,13 +380,28 @@ export default function RPASettingsPage() {
                 </label>
                 <div className="input-with-icon">
                   <input
-                    name="jobbox_password"
+                    name={
+                      siteType === "jobbox"
+                        ? "jobbox_password"
+                        : "engage_password"
+                    }
                     autoComplete="new-password"
                     type={showPasswords[0] ? "text" : "password"}
-                    value={rows[0]?.jobbox_password || ""}
-                    onChange={(e) =>
-                      updateRow(0, "jobbox_password", e.target.value)
+                    value={
+                      siteType === "jobbox"
+                        ? rows[0]?.jobbox_password || ""
+                        : engageFormData.engage_password || ""
                     }
+                    onChange={(e) => {
+                      if (siteType === "jobbox") {
+                        updateRow(0, "jobbox_password", e.target.value);
+                      } else {
+                        setEngageFormData({
+                          ...engageFormData,
+                          engage_password: e.target.value,
+                        });
+                      }
+                    }}
                     placeholder="パスワードを入力してください"
                     required
                     className="input"
@@ -386,7 +532,9 @@ export default function RPASettingsPage() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {s.jobbox_id}
+                    {siteType === "jobbox"
+                      ? (s as any).jobbox_id
+                      : (s as any).engage_id}
                   </div>
                 </div>
 
@@ -402,24 +550,45 @@ export default function RPASettingsPage() {
                     style={{ display: "flex", alignItems: "center", gap: 8 }}
                   >
                     <span style={{ fontFamily: "monospace" }}>
-                      {s.jobbox_password_hidden ? "●●●●●●" : s.jobbox_password}
+                      {siteType === "jobbox"
+                        ? (s as any).jobbox_password_hidden
+                          ? "●●●●●●"
+                          : (s as any).jobbox_password
+                        : (s as any).engage_password_hidden
+                        ? "●●●●●●"
+                        : (s as any).engage_password}
                     </span>
                     <button
                       type="button"
                       onClick={() =>
                         setSaved((prev) =>
-                          prev.map((it, idx) =>
-                            idx === i
-                              ? {
-                                  ...it,
-                                  jobbox_password_hidden:
-                                    !it.jobbox_password_hidden,
-                                }
-                              : it
-                          )
+                          prev.map((it, idx) => {
+                            if (idx !== i) return it;
+                            if (siteType === "jobbox") {
+                              return {
+                                ...it,
+                                jobbox_password_hidden: !(it as any)
+                                  .jobbox_password_hidden,
+                              };
+                            } else {
+                              return {
+                                ...it,
+                                engage_password_hidden: !(it as any)
+                                  .engage_password_hidden,
+                              };
+                            }
+                          })
                         )
                       }
-                      aria-label={s.jobbox_password_hidden ? "表示" : "隠す"}
+                      aria-label={
+                        siteType === "jobbox"
+                          ? (s as any).jobbox_password_hidden
+                            ? "表示"
+                            : "隠す"
+                          : (s as any).engage_password_hidden
+                          ? "表示"
+                          : "隠す"
+                      }
                       style={{
                         border: "none",
                         background: "transparent",
@@ -433,7 +602,11 @@ export default function RPASettingsPage() {
                         lineHeight: 0,
                       }}
                     >
-                      {s.jobbox_password_hidden ? (
+                      {(
+                        siteType === "jobbox"
+                          ? (s as any).jobbox_password_hidden
+                          : (s as any).engage_password_hidden
+                      ) ? (
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
                           width="18"

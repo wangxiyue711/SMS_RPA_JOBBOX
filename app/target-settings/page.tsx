@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { getClientAuth } from "../../lib/firebaseClient";
+
+type SiteType = "jobbox" | "engage";
 import {
   getFirestore,
   doc,
@@ -582,6 +584,7 @@ export default function TargetSettingsPage() {
       };
     };
   };
+  const [siteType, setSiteType] = useState<SiteType>("jobbox");
   const [segments, setSegments] = useState<Segment[]>([]);
   const [segFormOpen, setSegFormOpen] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -643,7 +646,7 @@ export default function TargetSettingsPage() {
       }
     }
     initAuth();
-  }, []);
+  }, [siteType]);
 
   async function loadSetting() {
     const user = await waitForAuthReady();
@@ -651,7 +654,9 @@ export default function TargetSettingsPage() {
     try {
       const db = getFirestore();
       const uid = (user as any).uid;
-      const docRef = doc(db, "accounts", uid, "target_settings", "settings");
+      const settingsCollection =
+        siteType === "jobbox" ? "target_settings" : "engage_target_settings";
+      const docRef = doc(db, "accounts", uid, settingsCollection, "settings");
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         const data = snap.data() as any;
@@ -709,7 +714,9 @@ export default function TargetSettingsPage() {
       const db = getFirestore();
       const uid = (user as any).uid;
       console.log("loadSegments uid:", uid);
-      const coll = collection(db, "accounts", uid, "target_segments");
+      const segmentsCollection =
+        siteType === "jobbox" ? "target_segments" : "engage_target_segments";
+      const coll = collection(db, "accounts", uid, segmentsCollection);
       const q = query(coll, orderBy("priority", "asc"));
       const snap = await getDocs(q);
       const list: Segment[] = [];
@@ -801,8 +808,13 @@ export default function TargetSettingsPage() {
       console.log("Saving segment:", segDraft);
 
       // 测试基本的写权限
+      const segmentsCollection =
+        siteType === "jobbox" ? "target_segments" : "engage_target_segments";
       console.log(
-        "Testing write permission to path: accounts/" + uid + "/target_segments"
+        "Testing write permission to path: accounts/" +
+          uid +
+          "/" +
+          segmentsCollection
       );
 
       // Prepare payloads without undefined fields (Firestore rejects undefined)
@@ -833,7 +845,7 @@ export default function TargetSettingsPage() {
       if (segDraft.id) {
         console.log("Updating existing segment:", segDraft.id);
         await updateDoc(
-          doc(db, "accounts", uid, "target_segments", segDraft.id),
+          doc(db, "accounts", uid, segmentsCollection, segDraft.id),
           {
             title: segDraft.title.trim(),
             enabled: !!segDraft.enabled,
@@ -845,7 +857,7 @@ export default function TargetSettingsPage() {
         );
       } else {
         console.log("Creating new segment");
-        const coll = collection(db, "accounts", uid, "target_segments");
+        const coll = collection(db, "accounts", uid, segmentsCollection);
         await addDoc(coll, {
           title: segDraft.title.trim(),
           enabled: !!segDraft.enabled,
@@ -918,7 +930,9 @@ export default function TargetSettingsPage() {
       if (!user) throw new Error("未ログインです。ログインしてください。");
       const db = getFirestore();
       const uid = (user as any).uid;
-      await deleteDoc(doc(db, "accounts", uid, "target_segments", id));
+      const segmentsCollection =
+        siteType === "jobbox" ? "target_segments" : "engage_target_segments";
+      await deleteDoc(doc(db, "accounts", uid, segmentsCollection, id));
       loadSegments();
       setDeleteDialog(null);
     } catch (e) {
@@ -968,7 +982,9 @@ export default function TargetSettingsPage() {
       if (!user) throw new Error("未ログインです。ログインしてください。");
       const db = getFirestore();
       const uid = (user as any).uid;
-      await updateDoc(doc(db, "accounts", uid, "target_segments", id), {
+      const segmentsCollection =
+        siteType === "jobbox" ? "target_segments" : "engage_target_segments";
+      await updateDoc(doc(db, "accounts", uid, segmentsCollection, id), {
         enabled: !enabled,
         updatedAt: Date.now(),
       });
@@ -1002,10 +1018,12 @@ export default function TargetSettingsPage() {
       const uid = (user as any).uid;
 
       // Use batch to atomically write new priorities for all items in the list
+      const segmentsCollection =
+        siteType === "jobbox" ? "target_segments" : "engage_target_segments";
       const batch = writeBatch(db);
       newOrder.forEach((seg, i) => {
         if (!seg.id) return;
-        const ref = doc(db, "accounts", uid, "target_segments", seg.id);
+        const ref = doc(db, "accounts", uid, segmentsCollection, seg.id);
         batch.update(ref, { priority: i, updatedAt: serverTimestamp() } as any);
       });
 
@@ -1049,6 +1067,55 @@ export default function TargetSettingsPage() {
       <p style={{ marginBottom: 16 }}>
         RoMeALLが対象とする応募者を設定 / 管理することができます。
       </p>
+
+      {/* Tab UI for Site Selection */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          marginBottom: 24,
+          borderBottom: "2px solid #e5e7eb",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setSiteType("jobbox")}
+          style={{
+            padding: "12px 24px",
+            fontWeight: 600,
+            background: "transparent",
+            border: "none",
+            borderBottom:
+              siteType === "jobbox"
+                ? "3px solid #36bdccff"
+                : "3px solid transparent",
+            color: siteType === "jobbox" ? "#36bdccff" : "#6b7280",
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          求人ボックス
+        </button>
+        <button
+          type="button"
+          onClick={() => setSiteType("engage")}
+          style={{
+            padding: "12px 24px",
+            fontWeight: 600,
+            background: "transparent",
+            border: "none",
+            borderBottom:
+              siteType === "engage"
+                ? "3px solid #36bdccff"
+                : "3px solid transparent",
+            color: siteType === "engage" ? "#36bdccff" : "#6b7280",
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          エンゲージ
+        </button>
+      </div>
 
       {/* Segments (多条件分组) manager - 完全按照截图重新设计 */}
       <div style={{ marginTop: 24 }}>

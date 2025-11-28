@@ -118,6 +118,17 @@ if not exist .venv\Scripts\python.exe (
   exit /b 1
 )
 
+REM Check if another run_watcher.cmd is already running for this project
+tasklist /V /FI "WINDOWTITLE eq RPA Monitoring*" 2>nul | find /I "cmd.exe" >nul
+if not errorlevel 1 (
+  echo.
+  echo [WARNING] Another RPA Monitoring window is already running!
+  echo Please close the existing window first to avoid conflicts.
+  echo.
+  pause
+  exit /b 1
+)
+
 REM Prompt for UID and interval
 set /p USER_UID=UID: 
 if "%USER_UID%"=="" (
@@ -128,6 +139,9 @@ if "%USER_UID%"=="" (
 
 set /p USER_INTERVAL=Interval seconds (default=30): 
 if "%USER_INTERVAL%"=="" set USER_INTERVAL=30
+
+REM Change window title to identify this monitoring session
+title RPA Monitoring - UID: %USER_UID%
 
 echo.
 echo ========================================
@@ -168,9 +182,8 @@ if %FOUND%==0 (
   goto RESTART_LOOP
 )
 
-REM Wait 10 seconds before next check
 REM Wait 10 minutes before next check
-timeout /t 600 >nul
+timeout /t 600 /nobreak >nul
 goto CHECK_LOOP
 
 endlocal

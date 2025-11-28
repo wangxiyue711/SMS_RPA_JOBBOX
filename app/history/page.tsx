@@ -44,7 +44,11 @@ export default function HistoryPage() {
   const [statusFilters, setStatusFilters] = useState<Set<string>>(
     new Set(["sent_m", "sent_s", "sent_ms", "failed", "target_out"])
   );
+  const [platformFilters, setPlatformFilters] = useState<Set<string>>(
+    new Set(["jobbox", "engage"])
+  );
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
+  const [platformDropdownOpen, setPlatformDropdownOpen] = useState(false);
 
   useEffect(() => {
     loadHistory();
@@ -62,10 +66,16 @@ export default function HistoryPage() {
       if (filterDropdownOpen && !target.closest(".filter-dropdown-container")) {
         setFilterDropdownOpen(false);
       }
+      if (
+        platformDropdownOpen &&
+        !target.closest(".platform-dropdown-container")
+      ) {
+        setPlatformDropdownOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [filterDropdownOpen]);
+  }, [filterDropdownOpen, platformDropdownOpen]);
 
   async function loadHistory() {
     setLoading(true);
@@ -226,13 +236,20 @@ export default function HistoryPage() {
     };
 
     const lines = selectedRows.map((r) => {
-      const namePair = extractNameAndFurigana(r.name || r.fullName || "");
-      // 姓名空格统一为半角
-      const name = namePair.name.replace(/[　]+/g, " ").replace(/ +/g, " ");
-      // ふりがな空格统一为半角
-      const furigana = namePair.furigana
-        .replace(/[　]+/g, " ")
-        .replace(/ +/g, " ");
+      // Check if furigana exists as separate field in Firestore
+      let name, furigana;
+      if (r.furigana) {
+        // Use separate fields directly
+        name = (r.name || r.fullName || "")
+          .replace(/[　]+/g, " ")
+          .replace(/ +/g, " ");
+        furigana = r.furigana.replace(/[　]+/g, " ").replace(/ +/g, " ");
+      } else {
+        // Extract from combined name string
+        const namePair = extractNameAndFurigana(r.name || r.fullName || "");
+        name = namePair.name.replace(/[　]+/g, " ").replace(/ +/g, " ");
+        furigana = namePair.furigana.replace(/[　]+/g, " ").replace(/ +/g, " ");
+      }
       // const name already extracted above
       const gender = r.gender || "";
       const birthRaw = r.birth || r.birthdate || "";
@@ -539,10 +556,36 @@ export default function HistoryPage() {
     setPage(0);
   };
 
-  // 筛选后的数据
-  const filteredRows = rows.filter((r) =>
-    statusFilters.has(getResultCategory(r))
-  );
+  // 切换平台筛选项
+  const togglePlatformFilter = (platform: string) => {
+    setPlatformFilters((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(platform)) {
+        newSet.delete(platform);
+      } else {
+        newSet.add(platform);
+      }
+      return newSet;
+    });
+    setPage(0);
+  };
+
+  // 获取平台类型
+  const getPlatform = (r: any): string => {
+    // 检查source字段
+    if (r.source === "engage") return "engage";
+    // 检查platform字段
+    if (r.platform === "エンゲージ" || r.platform === "engage") return "engage";
+    // 默认为jobbox
+    return "jobbox";
+  };
+
+  // 筛选后的数据（按送信結果和平台）
+  const filteredRows = rows.filter((r) => {
+    const matchesStatus = statusFilters.has(getResultCategory(r));
+    const matchesPlatform = platformFilters.has(getPlatform(r));
+    return matchesStatus && matchesPlatform;
+  });
 
   return (
     <div style={{ padding: 28 }}>
@@ -556,6 +599,116 @@ export default function HistoryPage() {
       >
         <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>HISTORY</h2>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* 平台フィルター下拉菜单 */}
+          <div
+            style={{ position: "relative" }}
+            className="platform-dropdown-container"
+          >
+            <button
+              className="btn"
+              onClick={() => setPlatformDropdownOpen(!platformDropdownOpen)}
+              style={{
+                width: "auto",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span>プラットフォーム</span>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#666",
+                  background: "#e8f4f8",
+                  padding: "2px 6px",
+                  borderRadius: 10,
+                  fontWeight: 600,
+                }}
+              >
+                {platformFilters.size}/2
+              </span>
+              <span style={{ fontSize: 10 }}>
+                {platformDropdownOpen ? "▲" : "▼"}
+              </span>
+            </button>
+
+            {platformDropdownOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  left: 0,
+                  background: "#fff",
+                  border: "1px solid #e0e0e0",
+                  borderRadius: 8,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                  padding: "12px",
+                  minWidth: "220px",
+                  zIndex: 1000,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: "pointer",
+                      fontSize: 14,
+                      padding: "4px 0",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={platformFilters.has("jobbox")}
+                      onChange={() => togglePlatformFilter("jobbox")}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <span>
+                      求人ボックス{" "}
+                      <span style={{ color: "#888", fontSize: 13 }}>
+                        (
+                        {rows.filter((r) => getPlatform(r) === "jobbox").length}
+                        )
+                      </span>
+                    </span>
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: "pointer",
+                      fontSize: 14,
+                      padding: "4px 0",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={platformFilters.has("engage")}
+                      onChange={() => togglePlatformFilter("engage")}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <span>
+                      エンゲージ{" "}
+                      <span style={{ color: "#888", fontSize: 13 }}>
+                        (
+                        {rows.filter((r) => getPlatform(r) === "engage").length}
+                        )
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* フィルター下拉菜单 */}
           <div
             style={{ position: "relative" }}
@@ -571,7 +724,7 @@ export default function HistoryPage() {
                 gap: 6,
               }}
             >
-              <span>フィルター</span>
+              <span>送信結果</span>
               <span
                 style={{
                   fontSize: 12,
@@ -909,10 +1062,16 @@ export default function HistoryPage() {
                     )}
                     <td className="history-cell">
                       {(() => {
+                        // If furigana field exists separately, just return name directly
+                        if (r.furigana) {
+                          return (r.name || r.fullName || "-")
+                            .replace(/[　]+/g, " ")
+                            .replace(/ +/g, " ");
+                        }
+                        // Otherwise extract from combined name string
                         const p = extractNameAndFurigana(
                           r.name || r.fullName || ""
                         );
-                        // 姓名空格统一为半角
                         return (p.name || r.name || r.fullName || "-")
                           .replace(/[　]+/g, " ")
                           .replace(/ +/g, " ");
@@ -920,10 +1079,16 @@ export default function HistoryPage() {
                     </td>
                     <td className="history-cell">
                       {(() => {
+                        // Check if furigana exists as separate field in Firestore
+                        if (r.furigana) {
+                          return r.furigana
+                            .replace(/[　]+/g, " ")
+                            .replace(/ +/g, " ");
+                        }
+                        // Otherwise extract from combined name string
                         const p = extractNameAndFurigana(
                           r.name || r.fullName || ""
                         );
-                        // ふりがな空格统一为半角
                         return (p.furigana || "-")
                           .replace(/[　]+/g, " ")
                           .replace(/ +/g, " ");
