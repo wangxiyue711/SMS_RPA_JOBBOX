@@ -3,12 +3,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { getClientAuth } from "../../lib/firebaseClient";
 import { getFirestore, collection, getDocs } from "firebase/firestore";
+import PlatformSelect from "../components/PlatformSelect";
 
 export default function DashboardClient() {
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<any>({});
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+  const [platform, setPlatform] = useState<"all" | "jobbox" | "engage">("all");
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const isDown = useRef(false);
@@ -52,7 +54,20 @@ export default function DashboardClient() {
     }
     loadStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startDate, endDate]);
+  }, [startDate, endDate, platform]);
+
+  // 平台筛选持久化（初次加载读取）
+  useEffect(() => {
+    try {
+      const p =
+        typeof window !== "undefined"
+          ? localStorage.getItem("dashboard:platform")
+          : null;
+      if (p === "all" || p === "jobbox" || p === "engage") {
+        setPlatform(p as any);
+      }
+    } catch {}
+  }, []);
 
   async function waitForAuthReady(timeout = 3000): Promise<any | null> {
     const auth = getClientAuth();
@@ -124,7 +139,20 @@ export default function DashboardClient() {
         return s >= selStartSec && s <= selEndSec;
       });
 
-      const total = filteredRows.length;
+      // 平台识别（与 history 页保持一致）
+      const getPlatform = (r: any): "jobbox" | "engage" => {
+        if (r?.source === "engage") return "engage";
+        if (r?.platform === "エンゲージ" || r?.platform === "engage")
+          return "engage";
+        return "jobbox";
+      };
+
+      // 按平台过滤（全部/Jobbox/Engage）
+      const platformRows = filteredRows.filter(
+        (r) => platform === "all" || getPlatform(r) === platform
+      );
+
+      const total = platformRows.length;
       let sent = 0;
       let failed = 0;
       let targetOut = 0;
@@ -200,7 +228,7 @@ export default function DashboardClient() {
         return { category: "failed" };
       };
 
-      filteredRows.forEach((r) => {
+      platformRows.forEach((r) => {
         const res = detectRowResult(r);
         if (res.category === "sent") sent += 1;
         else if (res.category === "targetOut") targetOut += 1;
@@ -217,7 +245,7 @@ export default function DashboardClient() {
           : Math.floor(new Date().getTime() / 1000);
       const days = Math.floor((endSec - startSec) / 86400) + 1;
       const dayCounts = new Array(Math.max(1, days)).fill(0);
-      filteredRows.forEach((r) => {
+      platformRows.forEach((r) => {
         let s = null;
         try {
           if (typeof r.sentAt === "number") s = r.sentAt;
@@ -236,7 +264,6 @@ export default function DashboardClient() {
           if (idx >= 0 && idx < dayCounts.length) dayCounts[idx] += 1;
         }
       });
-
       setStats({ total, sent, failed, targetOut, dayCounts, startSec, endSec });
     } catch (e) {
       console.error("loadStats error", e);
@@ -333,6 +360,22 @@ export default function DashboardClient() {
               } catch (err) {}
             }}
           />
+
+          {/* 平台筛选：全部 / Jobbox / Engage */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              プラットフォーム
+            </span>
+            <PlatformSelect
+              value={platform}
+              onChange={(v) => {
+                setPlatform(v);
+                try {
+                  localStorage.setItem("dashboard:platform", v);
+                } catch {}
+              }}
+            />
+          </div>
         </div>
         <div
           className="stat-grid"

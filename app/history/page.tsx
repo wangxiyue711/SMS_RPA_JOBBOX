@@ -259,7 +259,29 @@ export default function HistoryPage() {
       const email = r.email || "";
       const tel = r.tel || r.phone || r.mobilenumber || "";
       const addr = r.addr || "";
-      const school = r.school || "";
+      // 学校名：有些记录中会误填为応募No.
+      // 防御性处理：如果格式像応募No（字母数字+连字符分组），或与当前応募No相同，则视为未填写。
+      const schoolRaw = r.school || "";
+      const school = (() => {
+        try {
+          const ouboCandidate = (() => {
+            const extracted = r.oubo_no_extracted;
+            if (extracted) return extracted;
+            const raw = r.oubo_no || "";
+            const m = String(raw).match(/[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/);
+            return m && m[0] ? m[0] : raw;
+          })();
+          const looksLikeOuBo = /^(?:[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)$/.test(
+            String(schoolRaw).trim()
+          );
+          const equalsOuBo =
+            String(schoolRaw).trim() === String(ouboCandidate).trim();
+          if (looksLikeOuBo || equalsOuBo) return "";
+          return schoolRaw;
+        } catch (e) {
+          return schoolRaw;
+        }
+      })();
       const oubo = (() => {
         const extracted = r.oubo_no_extracted;
         if (extracted) return extracted;

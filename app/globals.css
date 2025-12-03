@@ -1229,3 +1229,71 @@ main {
   color: var(--shade-1);
   box-shadow: 0 8px 26px rgba(16, 24, 32, 0.08);
 }
+
+/* Dashboard platform select: blue-green theme */
+.platform-select {
+  padding: 6px 10px;
+  border: 1px solid #d0d0d0; /* gray border */
+  border-radius: 6px;
+  background: #ffffff; /* white */
+  color: #333333; /* dark gray text */
+}
+.platform-select:hover {
+  border-color: #b5b5b5; /* hover gray */
+}
+.platform-select:focus {
+  outline: 2px solid #a6a6a6; /* focus ring gray */
+  outline-offset: 1px;
+  background: #f5f5f5; /* light gray */
+}
+/* Option popup styling is limited across browsers; this sets base colors */
+.platform-select option {
+  background: #ffffff;
+  color: #333333;
+}
+
+/* Custom dropdown wrapper and popup for full control */
+.platform-select-wrap {
+  position: relative;
+  display: inline-block;
+}
+.platform-select.is-open {
+  border-color: #b5b5b5;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.06);
+}
+.platform-select__arrow {
+  display: inline-block;
+  margin-left: 8px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #4a4a4a; /* caret color (gray) */
+}
+.platform-select__menu {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 160px;
+  width: max-content;
+  background: #ffffff;
+  border: 1px solid #d0d0d0; /* gray border */
+  border-radius: 8px;
+  box-shadow: 0 10px 26px rgba(16, 24, 32, 0.12);
+  overflow: hidden;
+}
+.platform-select__option {
+  padding: 8px 12px;
+  font-size: 14px;
+  color: #333333; /* dark gray text */
+  cursor: pointer;
+  background: #fff;
+}
+.platform-select__option.is-hover {
+  background: #f0f0f0; /* hover background (light gray) */
+}
+.platform-select__option.is-selected {
+  background: #4a4a4a; /* selected background (gray) */
+  color: #ffffff; /* selected text */
+}
