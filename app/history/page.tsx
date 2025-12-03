@@ -271,12 +271,37 @@ export default function HistoryPage() {
             const m = String(raw).match(/[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/);
             return m && m[0] ? m[0] : raw;
           })();
+
+          const sRaw = String(schoolRaw).trim();
+
+          // 1. Check for the specific header text seen in bad data
+          if (sRaw.includes("応募日時・応募No.")) return "";
+
+          // 1.5 Check if it looks like a date/time (often mis-scraped into school field)
+          // Matches YYYY/MM/DD or HH:MM patterns which are unlikely to be in a school name
+          const looksLikeDate =
+            /\d{4}\/\d{1,2}\/\d{1,2}/.test(sRaw) ||
+            /\d{1,2}:\d{1,2}/.test(sRaw);
+          if (looksLikeDate) return "";
+
+          // 2. Check if it looks like an ID only (existing check)
           const looksLikeOuBo = /^(?:[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)$/.test(
-            String(schoolRaw).trim()
+            sRaw
           );
-          const equalsOuBo =
-            String(schoolRaw).trim() === String(ouboCandidate).trim();
-          if (looksLikeOuBo || equalsOuBo) return "";
+
+          // 3. Check if it equals the candidate (existing check)
+          const equalsOuBo = sRaw === String(ouboCandidate).trim();
+
+          // 4. Check if it *contains* the candidate, provided the candidate is a valid ID format
+          //    (to catch cases where the ID is embedded in a larger string)
+          const candidateIsId = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/.test(
+            String(ouboCandidate)
+          );
+          const containsOuBo =
+            candidateIsId && sRaw.includes(String(ouboCandidate).trim());
+
+          if (looksLikeOuBo || equalsOuBo || containsOuBo) return "";
+
           return schoolRaw;
         } catch (e) {
           return schoolRaw;
