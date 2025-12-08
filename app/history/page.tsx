@@ -223,6 +223,7 @@ export default function HistoryPage() {
       "電話番号",
       "住所",
       "学校名",
+      "求人タイトル",
       "応募No",
       "送信日時",
       "送信結果",
@@ -307,6 +308,9 @@ export default function HistoryPage() {
           return schoolRaw;
         }
       })();
+
+      const jobTitle = r.job_title || "";
+
       const oubo = (() => {
         const extracted = r.oubo_no_extracted;
         if (extracted) return extracted;
@@ -415,6 +419,7 @@ export default function HistoryPage() {
         tel,
         addr,
         school,
+        jobTitle,
         oubo,
         sent,
         result,
