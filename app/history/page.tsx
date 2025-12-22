@@ -311,12 +311,16 @@ export default function HistoryPage() {
 
       // 尝试从多个来源提取求人タイトル
       const jobTitle = (() => {
-        // 1. 尝试标准字段名
+        // 1. 尝试标准字段名（包括各种可能的变体）
         if (r.job_title) return r.job_title;
         if (r.jobTitle) return r.jobTitle;
         if (r.title) return r.title;
         if (r.求人タイトル) return r.求人タイトル;
         if (r.kyujin) return r.kyujin;
+        if (r.job) return r.job;
+        if (r.position) return r.position;
+        if (r.職種) return r.職種;
+        if (r.募集職種) return r.募集職種;
 
         // 2. 尝试从response对象中提取
         try {
@@ -325,23 +329,41 @@ export default function HistoryPage() {
             if (r.response.jobTitle) return r.response.jobTitle;
             if (r.response.title) return r.response.title;
             if (r.response.kyujin) return r.response.kyujin;
+            if (r.response.job) return r.response.job;
           }
         } catch (e) {}
 
-        // 3. 尝试从邮件subject中提取【求人タイトル】
+        // 3. 尝试从template字段提取（可能保存了segment标题）
+        try {
+          const template = r.template || "";
+          if (
+            template &&
+            template !== "unknown" &&
+            template !== "scheduled" &&
+            !template.includes("送信")
+          ) {
+            // 如果template看起来像是求人标题而不是segment名称
+            if (template.length > 3 && !template.includes("セグメント")) {
+              return template;
+            }
+          }
+        } catch (e) {}
+
+        // 4. 尝试从邮件subject中提取【求人タイトル】
         try {
           const subject = r.subject || "";
           const match = subject.match(/【(.+?)】/);
           if (match && match[1]) return match[1];
         } catch (e) {}
 
-        // 4. 尝试从邮件body中提取（可能包含"求人："等前缀）
+        // 5. 尝试从邮件body中提取（可能包含"求人："等前缀）
         try {
           const body = r.body || r.message || "";
           const patterns = [
             /求人[:：]\s*(.+?)[\n\r]/,
             /求人タイトル[:：]\s*(.+?)[\n\r]/,
             /職種[:：]\s*(.+?)[\n\r]/,
+            /募集職種[:：]\s*(.+?)[\n\r]/,
           ];
           for (const pattern of patterns) {
             const match = body.match(pattern);
@@ -350,6 +372,19 @@ export default function HistoryPage() {
             }
           }
         } catch (e) {}
+
+        // 6. Debug: 输出到console帮助排查（仅开发环境）
+        if (
+          typeof window !== "undefined" &&
+          window.location.hostname === "localhost"
+        ) {
+          console.log(
+            "No job title found for record:",
+            r.id,
+            "Available fields:",
+            Object.keys(r)
+          );
+        }
 
         return "";
       })();
