@@ -564,7 +564,26 @@ return 'NOT_FOUND';
             gender = '不明'
         birth  = pick(["//*[contains(.,'生年月日')]/following::*[1]"])
         email  = pick(["//*[contains(.,'メールアドレス')]/following::*[1]"])
-        tel    = pick(["//*[contains(.,'電話')]/following::*[1]"])
+        tel_raw = pick([
+            "//*[contains(.,'電話')]/following::*[1]",
+            "//*[contains(.,'電話番号')]/following::*[1]",
+            "//dt[contains(.,'電話')]/following-sibling::dd[1]",
+            "//th[contains(.,'電話')]/following-sibling::td[1]"
+        ])
+        # Filter out "非公開" and try to find actual phone number
+        tel = tel_raw
+        if tel_raw and ('非公開' in tel_raw or '非公开' in tel_raw or tel_raw.strip() == ''):
+            # Try to find phone number pattern in the page
+            try:
+                phone_pattern = r'0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}'
+                all_text = self.driver.find_element(By.TAG_NAME, 'body').text
+                phone_matches = re.findall(phone_pattern, all_text)
+                if phone_matches:
+                    # Use the first match that looks like a phone number
+                    tel = phone_matches[0]
+                    print(f"[電話番号を検出] パターンマッチから取得: {tel}")
+            except Exception:
+                pass
         addr   = pick(["//*[contains(.,'住所')]/following::*[1]"])
         # 学校名の抽出をより厳密に（"学校" だけの部分一致は "専門学校生" 等にもマッチするため禁止し、必ず "学校名" ラベルに限定）
         def _xp_eq_school_label(tag):
@@ -1051,7 +1070,7 @@ return 'NOT_FOUND';
                     except: pass
 
             if not el:
-                raise Exception('未能定位到メモ入力欄')
+                raise Exception('メモ入力欄が見つかりませんでした')
 
             # Read existing content (support textarea/input/value and contenteditable)
             existing = ''
@@ -1139,7 +1158,7 @@ return 'NOT_FOUND';
                     except: pass
 
             if not btn:
-                raise Exception('未能定位到「選考情報を更新する」按钮')
+                raise Exception('「選考情報を更新する」ボタンが見つかりませんでした')
 
             self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
             try:

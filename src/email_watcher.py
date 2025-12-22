@@ -2477,6 +2477,16 @@ def scheduled_task_worker(uid, stop_event):
             process_scheduled_tasks_once(uid)
         except Exception as e:
             print(f'エラー: {e}')
+            try:
+                import traceback
+                tb = traceback.format_exc()
+                log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+                if not os.path.exists(log_dir):
+                    os.makedirs(log_dir)
+                with open(os.path.join(log_dir, 'scheduled_errors.log'), 'a', encoding='utf-8') as f:
+                    f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] UID={uid}\n{tb}\n")
+            except Exception:
+                pass
         
         # Wait 5 seconds (improved accuracy for faster response)
         stop_event.wait(5)
@@ -3396,6 +3406,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'addr': detail.get('addr'),
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                            'job_title': detail.get('kyujin') or '',
                                                             'status': '送信失敗',
                                                             'response': {'note': 'missing tel or template'},
                                                             'sentAt': int(time.time())
@@ -3746,6 +3757,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'addr': detail.get('addr'),
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                            'job_title': detail.get('kyujin') or '',
                                                             'status': mail_status,
                                                             'response': mail_sent_info if isinstance(mail_sent_info, dict) else {'note': str(mail_sent_info)},
                                                             'sentAt': int(time.time())
@@ -3776,6 +3788,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'addr': detail.get('addr'),
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                            'job_title': detail.get('kyujin') or '',
                                                             'status': '対象外',
                                                             'response': {'note': 'evaluated as not target'},
                                                             'sentAt': int(time.time())
@@ -4502,6 +4515,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'addr': detail.get('addr'),
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no'),
+                                                            'job_title': detail.get('kyujin') or detail.get('title') or '',
                                                             'source': 'engage',
                                                             'platform': 'エンゲージ',
                                                             'segment_title': matching_segment.get('title'),
@@ -4528,6 +4542,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                     'tel': detail.get('tel'),
                                                     'addr': detail.get('addr'),
                                                     'oubo_no': detail.get('oubo_no'),
+                                                    'job_title': detail.get('title') or '',
                                                     'source': 'engage',
                                                     'platform': 'エンゲージ',
                                                     'status': '対象外',
@@ -5014,7 +5029,7 @@ if __name__ == '__main__':
                 os.makedirs(log_dir)
             log_file = os.path.join(log_dir, f'crash_{int(time.time())}.log')
             with open(log_file, 'w', encoding='utf-8') as f:
-                f.write(f"Time: {datetime.datetime.now()}\n") # type: ignore
+                f.write(f"Time: {datetime.now()}\n")
                 f.write(f"Error: {e}\n")
                 f.write(traceback.format_exc())
             print(f"\nエラーログを保存しました: {log_file}")
