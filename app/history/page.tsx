@@ -309,7 +309,13 @@ export default function HistoryPage() {
         }
       })();
 
-      const jobTitle = r.job_title || "";
+      const jobTitle =
+        r.job_title ||
+        r.jobTitle ||
+        r.title ||
+        r.求人タイトル ||
+        r.kyujin ||
+        "";
 
       const oubo = (() => {
         const extracted = r.oubo_no_extracted;
