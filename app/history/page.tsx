@@ -309,13 +309,50 @@ export default function HistoryPage() {
         }
       })();
 
-      const jobTitle =
-        r.job_title ||
-        r.jobTitle ||
-        r.title ||
-        r.求人タイトル ||
-        r.kyujin ||
-        "";
+      // 尝试从多个来源提取求人タイトル
+      const jobTitle = (() => {
+        // 1. 尝试标准字段名
+        if (r.job_title) return r.job_title;
+        if (r.jobTitle) return r.jobTitle;
+        if (r.title) return r.title;
+        if (r.求人タイトル) return r.求人タイトル;
+        if (r.kyujin) return r.kyujin;
+
+        // 2. 尝试从response对象中提取
+        try {
+          if (r.response && typeof r.response === "object") {
+            if (r.response.job_title) return r.response.job_title;
+            if (r.response.jobTitle) return r.response.jobTitle;
+            if (r.response.title) return r.response.title;
+            if (r.response.kyujin) return r.response.kyujin;
+          }
+        } catch (e) {}
+
+        // 3. 尝试从邮件subject中提取【求人タイトル】
+        try {
+          const subject = r.subject || "";
+          const match = subject.match(/【(.+?)】/);
+          if (match && match[1]) return match[1];
+        } catch (e) {}
+
+        // 4. 尝试从邮件body中提取（可能包含"求人："等前缀）
+        try {
+          const body = r.body || r.message || "";
+          const patterns = [
+            /求人[:：]\s*(.+?)[\n\r]/,
+            /求人タイトル[:：]\s*(.+?)[\n\r]/,
+            /職種[:：]\s*(.+?)[\n\r]/,
+          ];
+          for (const pattern of patterns) {
+            const match = body.match(pattern);
+            if (match && match[1]) {
+              return match[1].trim();
+            }
+          }
+        } catch (e) {}
+
+        return "";
+      })();
 
       const oubo = (() => {
         const extracted = r.oubo_no_extracted;
