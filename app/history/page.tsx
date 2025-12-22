@@ -330,10 +330,40 @@ export default function HistoryPage() {
             if (r.response.title) return r.response.title;
             if (r.response.kyujin) return r.response.kyujin;
             if (r.response.job) return r.response.job;
+
+            // 从response中的邮件subject提取
+            if (r.response.subject) {
+              const match = String(r.response.subject).match(/【(.+?)】/);
+              if (match && match[1]) return match[1].trim();
+            }
+            if (r.response.email_subject) {
+              const match = String(r.response.email_subject).match(/【(.+?)】/);
+              if (match && match[1]) return match[1].trim();
+            }
           }
         } catch (e) {}
 
-        // 3. 尝试从template字段提取（可能保存了segment标题）
+        // 3. 尝试从邮件subject字段提取【求人タイトル】（优先级提高）
+        try {
+          // 检查多个可能的subject字段名
+          const subjectFields = [
+            r.subject,
+            r.email_subject,
+            r.emailSubject,
+            r.mail_subject,
+            r.mailSubject,
+            r["件名"],
+          ];
+
+          for (const subjectField of subjectFields) {
+            if (subjectField) {
+              const match = String(subjectField).match(/【(.+?)】/);
+              if (match && match[1]) return match[1].trim();
+            }
+          }
+        } catch (e) {}
+
+        // 4. 尝试从template字段提取（可能保存了segment标题）
         try {
           const template = r.template || "";
           if (
@@ -349,21 +379,15 @@ export default function HistoryPage() {
           }
         } catch (e) {}
 
-        // 4. 尝试从邮件subject中提取【求人タイトル】
-        try {
-          const subject = r.subject || "";
-          const match = subject.match(/【(.+?)】/);
-          if (match && match[1]) return match[1];
-        } catch (e) {}
-
         // 5. 尝试从邮件body中提取（可能包含"求人："等前缀）
         try {
-          const body = r.body || r.message || "";
+          const body = r.body || r.message || r.email_body || "";
           const patterns = [
             /求人[:：]\s*(.+?)[\n\r]/,
             /求人タイトル[:：]\s*(.+?)[\n\r]/,
             /職種[:：]\s*(.+?)[\n\r]/,
             /募集職種[:：]\s*(.+?)[\n\r]/,
+            /【(.+?)】/, // 直接匹配【】
           ];
           for (const pattern of patterns) {
             const match = body.match(pattern);
