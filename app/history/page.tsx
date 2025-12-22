@@ -258,7 +258,9 @@ export default function HistoryPage() {
       const birth = birthPair.birth;
       const age = birthPair.age;
       const email = r.email || "";
-      const tel = r.tel || r.phone || r.mobilenumber || "";
+      // 电话号码添加制表符前缀，防止Excel删除前导0
+      const telRaw = r.tel || r.phone || r.mobilenumber || "";
+      const tel = telRaw ? `\t${telRaw}` : "";
       const addr = r.addr || "";
       // 学校名：有些记录中会误填为応募No.
       // 防御性处理：如果格式像応募No（字母数字+连字符分组），或与当前応募No相同，则视为未填写。
