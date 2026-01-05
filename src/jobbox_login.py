@@ -1043,7 +1043,7 @@ return 'NOT_FOUND';
         if not self._is_driver_alive():
             raise Exception('WebDriver セッションが無効です。ブラウザが閉じられた可能性があります。')
         
-        # 尝试找到メモ（textarea/input）并填写，然后点击「選考情報を更新する」按钮保存
+        # 尝试找到メモ（textarea/input）并填写，然后点击「選考情報を保存する」按钮保存
         try:
             # 优先找 textarea 或可编辑 div，兼容多种页面结构
             textarea_xps = [
@@ -1054,7 +1054,7 @@ return 'NOT_FOUND';
             el = None
             for xp in textarea_xps:
                 try:
-                    el = self._wait_xpath(xp, 3, visible=True)
+                    el = self._wait_xpath(xp, 8, visible=True)
                     if el:
                         break
                 except: pass
@@ -1133,16 +1133,16 @@ return 'NOT_FOUND';
             except Exception:
                 pass
 
-            # 查找并点击「選考情報を更新する」按钮（支持按钮、input[type=submit]、a）
+            # 查找并点击「選考情報を保存する」按钮（支持按钮、input[type=submit]、a）
             btn_xps = [
-                "//button[contains(., '選考情報を更新する') or contains(., '選考情報を更新')]",
-                "//input[@type='submit' and (contains(@value,'選考情報を更新する') or contains(@value,'更新'))]",
-                "//a[contains(., '選考情報を更新する') or contains(., '選考情報を更新')]",
+                "//button[contains(., '選考情報を保存する') or contains(., '選考情報を保存')]",
+                "//input[@type='submit' and (contains(@value,'選考情報を保存する') or contains(@value,'保存'))]",
+                "//a[contains(., '選考情報を保存する') or contains(., '選考情報を保存')]",
             ]
             btn = None
             for xp in btn_xps:
                 try:
-                    btn = self._wait_xpath(xp, 3, clickable=True)
+                    btn = self._wait_xpath(xp, 5, clickable=True)
                     if btn:
                         break
                 except: pass
@@ -1158,7 +1158,7 @@ return 'NOT_FOUND';
                     except: pass
 
             if not btn:
-                raise Exception('「選考情報を更新する」ボタンが見つかりませんでした')
+                raise Exception('「選考情報を保存する」ボタンが見つかりませんでした')
 
             self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
             try:
@@ -1168,7 +1168,7 @@ return 'NOT_FOUND';
 
             # 等待可能的保存完成（短等待）
             # 等待短时间让确认对话出现，然后尝试点击对话内的「変更する」按钮
-            time.sleep(0.8)
+            time.sleep(1.5)
             try:
                 # 常见的对话里按钮可能是 button 或 input[type=button]
                 confirm_xps = [
@@ -1179,7 +1179,7 @@ return 'NOT_FOUND';
                 conf = None
                 for xp in confirm_xps:
                     try:
-                        conf = self._wait_xpath(xp, 2, clickable=True)
+                        conf = self._wait_xpath(xp, 5, clickable=True)
                         if conf:
                             break
                     except: pass

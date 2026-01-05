@@ -2275,6 +2275,7 @@ def execute_scheduled_sms_task(task, write_history=True):
                 'addr': applicant_detail.get('addr', ''),
                 'school': applicant_detail.get('school', ''),
                 'oubo_no': oubo_no,
+                'job_title': applicant_detail.get('kyujin') or applicant_detail.get('title') or '',
                 'status': '送信済（S）' if success else '送信失敗（S）',
                 'template': 'scheduled',
                 'response': info if isinstance(info, dict) else {'note': str(info)},
@@ -2339,6 +2340,7 @@ def execute_scheduled_mail_task(task, write_history=True):
                 'addr': applicant_detail.get('addr', ''),
                 'school': applicant_detail.get('school', ''),
                 'oubo_no': oubo_no,
+                'job_title': applicant_detail.get('kyujin') or applicant_detail.get('title') or '',
                 'status': '送信済（M）' if success else '送信失敗（M）',
                 'template': 'scheduled',
                 'response': info if isinstance(info, dict) else {'note': str(info)},
@@ -2457,6 +2459,7 @@ def process_scheduled_tasks_once(uid):
                     'addr': applicant_detail.get('addr', ''),
                     'school': applicant_detail.get('school', ''),
                     'oubo_no': oubo_no,
+                    'job_title': applicant_detail.get('kyujin') or applicant_detail.get('title') or '',
                     'status': status,
                     'template': 'scheduled',
                     'response': combined_response,
@@ -3050,6 +3053,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'addr': detail.get('addr'),
                                                                 'school': detail.get('school'),
                                                                 'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                                'job_title': detail.get('kyujin') or '',
                                                                 'status': '送信失敗',
                                                                 'response': {'note': f'invalid phone: {reason}'},
                                                                 'sentAt': int(time.time())
@@ -3248,6 +3252,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'addr': detail.get('addr'),
                                                                 'school': detail.get('school'),
                                                                 'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                                'job_title': detail.get('kyujin') or detail.get('title') or '',
                                                                 'status': rec_status,
                                                                 'template': sms_target_segment.get('title') if sms_target_segment else 'unknown',
                                                                 'response': info if isinstance(info, dict) else {'note': str(info)},
@@ -3377,18 +3382,16 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             mail_result = 'mail未送信'
 
                                                         # If no label matched, write '対象外'
-                                                        if not label:
-                                                            memo_text = '対象外'
-                                                        else:
-                                                            ts = time.localtime()
-                                                            ts_str = time.strftime('%Y/%m/%d, %H:%M', ts)
-                                                            memo_text = f"【{label}】：{sms_result}/{mail_result}，{ts_str}"
-
-                                                        try:
-                                                            if 'jb' in locals() and jb:
-                                                                safe_set_memo_and_save(jb, memo_text, '(まとめ)')
-                                                        except Exception as e:
-                                                            print('メモ保存(まとめ)時に例外が発生しました:', e)
+                                                        # Only write comprehensive memo if label exists (matched a segment)
+                                                        # If no label (target-out), memo will be written at Line 3811 instead
+                                                        if label:
+                                                            # Don't add timestamp here - set_memo_and_save will auto-append it
+                                                            memo_text = f"【{label}】：{sms_result}/{mail_result}"
+                                                            try:
+                                                                if 'jb' in locals() and jb:
+                                                                    safe_set_memo_and_save(jb, memo_text, '(まとめ)')
+                                                            except Exception as e:
+                                                                print('メモ保存(まとめ)時に例外が発生しました:', e)
                                                     except Exception as e:
                                                         print('合并メモ処理で例外:', e)
                                             # If tel or template was missing, record that fact (do not run this when we successfully sent above)
@@ -3622,6 +3625,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                             'addr': detail.get('addr'),
                                                                             'school': detail.get('school'),
                                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                                            'job_title': detail.get('kyujin') or detail.get('title') or '',
                                                                             'status': '送信済（M）' if mail_ok else '送信失敗（M）',  # M for Mail
                                                                             'response': mail_info if isinstance(mail_info, dict) else {'note': str(mail_info)},
                                                                             'sentAt': int(time.time())
@@ -3711,6 +3715,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         'addr': detail.get('addr'),
                                                         'school': detail.get('school'),
                                                         'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
+                                                        'job_title': detail.get('kyujin') or detail.get('title') or '',
                                                         'status': combined_status,
                                                         'response': combined_response if combined_response else {'note': 'combined attempt'},
                                                         'sentAt': int(time.time())
@@ -4042,6 +4047,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 'tel': detail.get('tel'),
                                                 'addr': detail.get('addr'),
                                                 'oubo_no': detail.get('oubo_no'),
+                                                'job_title': detail.get('title') or '',
                                                 'source': 'engage',
                                                 'platform': 'エンゲージ',
                                                 'status': '対象外',
@@ -4124,6 +4130,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                     'addr': detail.get('addr'),
                                                                     'school': detail.get('school'),
                                                                     'oubo_no': detail.get('oubo_no'),
+                                                                    'job_title': detail.get('title') or '',
                                                                     'source': 'engage',
                                                                     'platform': 'エンゲージ',
                                                                     'status': '送信失敗',
@@ -4281,6 +4288,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                     'addr': detail.get('addr'),
                                                                     'school': detail.get('school'),
                                                                     'oubo_no': detail.get('oubo_no'),
+                                                                    'job_title': detail.get('title') or '',
                                                                     'source': 'engage',
                                                                     'platform': 'エンゲージ',
                                                                     'segment_title': matching_segment.get('title'),
@@ -4468,6 +4476,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                             'addr': detail.get('addr'),
                                                                             'school': detail.get('school'),
                                                                             'oubo_no': detail.get('oubo_no'),
+                                                                            'job_title': detail.get('title') or '',
                                                                             'source': 'engage',
                                                                             'platform': 'エンゲージ',
                                                                             'segment_title': matching_segment.get('title'),

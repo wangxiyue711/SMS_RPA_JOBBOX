@@ -1,149 +1,72 @@
-@echo off@echo off@echo off
-
 chcp 65001 >nul
+setlocal enabledelayedexpansion
 
-setlocal enabledelayedexpansionchcp 65001 >nulREM Activate venv and run the email watcher, redirect output to logs\watcher.log
-
-
-
-REM Auto-restart watcher for email_watcher.pysetlocal enabledelayedexpansionif not exist "logs" mkdir "logs"
-
+REM Auto-restart watcher for email_watcher.py
 if not exist "logs" mkdir "logs"
 
-if exist .venv\Scripts\python.exe (
-
 REM Check if .venv exists
-
-if not exist .venv\Scripts\python.exe (REM Auto-restart watcher for email_watcher.py  echo Using .venv\Scripts\python.exe
-
-  echo [エラー] .venv が見つかりません。先に install_all_windows.cmd を実行してください。
-
-  pauseif not exist "logs" mkdir "logs"  .venv\Scripts\python.exe -u src\email_watcher.py >>"logs\watcher.log" 2>&1
-
+if not exist .venv\Scripts\python.exe (
+  echo 仮想環境が見つかりません。install_all_windows.cmd を実行してください。
+  pause
   exit /b 1
-
-)) else (
-
-
-
-REM Prompt for UID and intervalREM Check if .venv exists  echo ".venv python.exe not found - attempting to run system python." >>"logs\watcher.log" 2>&1
-
-set /p USER_UID=UID を入力してください: 
-
-if "%USER_UID%"=="" (if not exist .venv\Scripts\python.exe (  python -u src\email_watcher.py >>"logs\watcher.log" 2>&1
-
-  echo [エラー] UID が必要です。
-
-  pause  echo [ERROR] .venv not found - please run install_all_windows.cmd first.)
-
-  exit /b 1
-
-)  pauseecho -------- watcher exited with code %errorlevel% >>"logs\watcher.log"
-
-
-
-set /p USER_INTERVAL=監視間隔（秒、デフォルト=30）:   exit /b 1echo Showing last 50 lines of logs\watcher.log
-
-if "%USER_INTERVAL%"=="" set USER_INTERVAL=30
-
-)powershell -Command "Get-Content -Path 'logs\\watcher.log' -Tail 50"
-
-echo.
-
-echo ========================================echo Press Enter to exit...
-
-echo RPA監視システム起動
-
-echo UID: %USER_UID%REM Prompt for UID and intervalpause
-
-echo 監視間隔: %USER_INTERVAL% 秒
-
-echo 自動再起動: 有効 10秒毎にチェックset /p USER_UID=UID: 
-
-echo ログ: logs\watcher.logif "%USER_UID%"=="" (
-
-echo ========================================  echo [ERROR] UID is required.
-
-echo.  pause
-
-echo このウィンドウを閉じるとRPAが停止します。  exit /b 1
-
-echo email_watcher.py のウィンドウが自動で開きます。)
-
-echo.
-
-set /p USER_INTERVAL=Interval seconds (default=30): 
-
-:RESTART_LOOPif "%USER_INTERVAL%"=="" set USER_INTERVAL=30
-
-REM Kill any existing EmailWatcher windows first
-
-for /f "tokens=2" %%p in ('tasklist /V /FI "WINDOWTITLE eq EmailWatcher*" 2^>nul ^| find /I "EmailWatcher"') do taskkill /PID %%p /F >nul 2>&1echo.
-
-timeout /t 2 /nobreak >nulecho ========================================
-
-echo RPA Monitoring System Started
-
-echo [%date% %time%] email_watcher.py を起動中... >> "logs\watcher.log"echo UID: %USER_UID%
-
-echo [%date% %time%] email_watcher.py を起動中...echo Interval: %USER_INTERVAL% seconds
-
-echo Auto-restart: Enabled (check every 10 seconds)
-
-REM Start python process with visible windowecho Log: logs\watcher.log
-
-start "EmailWatcher" .venv\Scripts\python.exe -u src\email_watcher.py --uid %USER_UID% --interval %USER_INTERVAL%echo ========================================
-
-echo.
-
-REM Wait for process to initializeecho Close this window to stop RPA.
-
-timeout /t 5 /nobreak >nulecho email_watcher.py window will open automatically.
-
-echo.
-
-:CHECK_LOOP
-
-REM Check if email_watcher window still exists:RESTART_LOOP
-
-tasklist /V /FI "WINDOWTITLE eq EmailWatcher*" 2>nul | find /I "EmailWatcher" >nulREM Kill any existing EmailWatcher windows first
-
-if errorlevel 1 (for /f "tokens=2" %%p in ('tasklist /V /FI "WINDOWTITLE eq EmailWatcher*" 2^>nul ^| find /I "EmailWatcher"') do taskkill /PID %%p /F >nul 2>&1
-
-  echo [%date% %time%] [警告] email_watcher.py が停止しました。10秒後に再起動します... >> "logs\watcher.log"timeout /t 2 /nobreak >nul
-
-  echo [%date% %time%] [警告] email_watcher.py が停止しました。10秒後に再起動します...
-
-  timeout /t 10 /nobreak >nulecho [%date% %time%] Starting email_watcher.py... >> "logs\watcher.log"
-
-  goto RESTART_LOOPecho [%date% %time%] Starting email_watcher.py...
-
 )
 
+REM Check if another run_watcher.cmd is already running for this project
+tasklist /V /FI "WINDOWTITLE eq RPA Monitoring*" 2>nul | find /I "cmd.exe" >nul
+if not errorlevel 1 (
+  echo.
+  echo.
+  pause
+  exit /b 1
+)
+
+echo.
+
+REM Prompt for UID and interval
+set /p USER_UID=UIDを入力してください: 
+if "%USER_UID%"=="" (
+  echo UIDが必要です。
+  pause
+  exit /b 1
+)
+
+set /p USER_INTERVAL=監視間隔（秒・デフォルト30）: 
+if "%USER_INTERVAL%"=="" set USER_INTERVAL=30
+
+REM Change window title to identify this monitoring session
+title RPA Monitoring - UID: %USER_UID%
+
+echo.
+echo EmailWatcherを起動しました。
+echo.
+
+:RESTART_LOOP
+REM Ensure no duplicate email_watcher.py processes (by command line, PowerShell, filter by UID)
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'email_watcher.py' -and $_.CommandLine -match $env:USER_UID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
+
+echo [%date% %time%] EmailWatcher起動中... >> "logs\watcher.log"
+
 REM Start python process with visible window
+start "EmailWatcher" .venv\Scripts\python.exe -u src\email_watcher.py --uid %USER_UID% --interval %USER_INTERVAL%
 
-REM Wait 10 seconds before next checkstart "EmailWatcher" .venv\Scripts\python.exe -u src\email_watcher.py --uid %USER_UID% --interval %USER_INTERVAL%
-
-timeout /t 10 /nobreak >nul
-
-goto CHECK_LOOPREM Wait for process to initialize
-
-timeout /t 5 /nobreak >nul
-
-endlocal
+REM Give it a moment to initialize
+timeout /t 5 >nul
 
 :CHECK_LOOP
-REM Check if email_watcher window still exists
-tasklist /V /FI "WINDOWTITLE eq EmailWatcher*" 2>nul | find /I "EmailWatcher" >nul
-if errorlevel 1 (
-  echo [%date% %time%] [WARNING] email_watcher.py stopped. Restarting in 10 seconds... >> "logs\watcher.log"
-  echo [%date% %time%] [WARNING] email_watcher.py stopped. Restarting in 10 seconds...
-  timeout /t 10 /nobreak >nul
+REM Check if email_watcher.py process is running (by command line, PowerShell)
+set FOUND=0
+for /f %%P in ('powershell -NoProfile -Command "@(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'email_watcher.py' -and $_.CommandLine -match $env:USER_UID }).Count"') do set FOUND=%%P
+if %FOUND%==0 (
+  echo [%date% %time%] EmailWatcherが停止しました。10秒後に再起動します... >> "logs\watcher.log"
+  REM Kill all email_watcher.py processes for this UID before restart
+  powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'email_watcher.py' -and $_.CommandLine -match $env:USER_UID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
+  timeout /t 10 >nul
   goto RESTART_LOOP
 )
 
-REM Wait 10 seconds before next check
-timeout /t 10 /nobreak >nul
+REM Wait 10 minutes before next check
+timeout /t 600 /nobreak >nul
 goto CHECK_LOOP
 
 endlocal
+
