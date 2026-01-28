@@ -339,8 +339,8 @@ def execute_mail_task(task):
     
     # Get mail settings
     mail_cfg = _get_mail_settings(uid)
-    sender = mail_cfg.get('email', '')
-    sender_pass = mail_cfg.get('appPass', '')
+    sender = mail_cfg.get('replyEmail') or mail_cfg.get('email', '')
+    sender_pass = mail_cfg.get('replyAppPass') or mail_cfg.get('appPass', '')
     
     if not sender or not sender_pass:
         return False, 'mail settings not configured'
@@ -444,7 +444,7 @@ def main():
     while True:
         try:
             process_scheduled_tasks(uid)
-        except KeyboardInterrupt:
+        except KeyboardInterrupt: 
             print('\n停止定时任务调度器')
             break
         except Exception as e:
@@ -453,7 +453,7 @@ def main():
         # Wait 1 minute before next check
         print('\n等待下一次检查...')
         time.sleep(60)
-
+ 
 
 if __name__ == '__main__':
     main()

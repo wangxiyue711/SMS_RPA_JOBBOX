@@ -459,7 +459,8 @@ def _find_service_account_file():
 def _get_mail_settings(uid: str) -> dict:
     """Read accounts/{uid}/mail_settings/settings from Firestore using service account file.
 
-    Returns dict with possible keys 'email' and 'appPass'. Empty dict on failure.
+    Returns dict with possible keys 'email', 'appPass', 'replyEmail', 'replyAppPass'.
+    Empty dict on failure.
     """
     sa_file = _find_service_account_file()
     if not sa_file:
@@ -491,6 +492,10 @@ def _get_mail_settings(uid: str) -> dict:
             res['email'] = fields.get('email', {}).get('stringValue')
         if 'appPass' in fields:
             res['appPass'] = fields.get('appPass', {}).get('stringValue')
+        if 'replyEmail' in fields:
+            res['replyEmail'] = fields.get('replyEmail', {}).get('stringValue')
+        if 'replyAppPass' in fields:
+            res['replyAppPass'] = fields.get('replyAppPass', {}).get('stringValue')
         return res
     except Exception:
         return {}
@@ -498,7 +503,7 @@ def _get_mail_settings(uid: str) -> dict:
 
 
 def _extract_string_value(field):
-    """Extract string value from Firestore field."""
+    """Extract string value from Firestore field."""   
     return field.get('stringValue', '')
 
 def _extract_bool_value(field):
@@ -640,7 +645,8 @@ def _get_engage_target_segments(uid: Optional[str]) -> list:
 def _get_engage_mail_settings(uid: str) -> dict:
     """Read accounts/{uid}/engage_mail_settings/settings from Firestore.
 
-    Returns dict with possible keys 'email' and 'appPass'. Empty dict on failure.
+    Returns dict with possible keys 'email', 'appPass', 'replyEmail', 'replyAppPass'.
+    Empty dict on failure.
     """
     sa_file = _find_service_account_file()
     if not sa_file:
@@ -672,6 +678,10 @@ def _get_engage_mail_settings(uid: str) -> dict:
             res['email'] = fields['email'].get('stringValue')
         if 'appPass' in fields:
             res['appPass'] = fields['appPass'].get('stringValue')
+        if 'replyEmail' in fields:
+            res['replyEmail'] = fields['replyEmail'].get('stringValue')
+        if 'replyAppPass' in fields:
+            res['replyAppPass'] = fields['replyAppPass'].get('stringValue')
         return res
     except Exception:
         return {}
@@ -1321,8 +1331,8 @@ def send_auto_reply_if_configured(uid, mail_cfg, is_target, detail, jb=None):
 
     # get sender creds from env or cloud
     mail_settings = _get_mail_settings(uid) if uid else {}
-    sender = os.environ.get('EMAIL_WATCHER_ADDR') or mail_settings.get('email')
-    sender_pass = os.environ.get('EMAIL_WATCHER_PASS') or mail_settings.get('appPass')
+    sender = mail_settings.get('replyEmail') or os.environ.get('EMAIL_WATCHER_ADDR') or mail_settings.get('email')
+    sender_pass = mail_settings.get('replyAppPass') or os.environ.get('EMAIL_WATCHER_PASS') or mail_settings.get('appPass')
     if not sender:
         msg = '送信元メールアドレスが見つかりません。メール送信をスキップします。'
         if debug:
@@ -2310,8 +2320,8 @@ def execute_scheduled_mail_task(task, write_history=True):
     
     # Get mail settings
     mail_cfg = _get_mail_settings(uid)
-    sender = mail_cfg.get('email', '')
-    sender_pass = mail_cfg.get('appPass', '')
+    sender = mail_cfg.get('replyEmail') or mail_cfg.get('email', '')
+    sender_pass = mail_cfg.get('replyAppPass') or mail_cfg.get('appPass', '')
     
     if not sender or not sender_pass:
         print(f'❌ メール設定未完了')
@@ -3446,8 +3456,8 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                     if to_email:
                                                         # Get mail settings (sender credentials)
                                                         mail_cfg = _get_mail_settings(str(uid) if uid is not None else "")
-                                                        sender = mail_cfg.get('email', '')
-                                                        sender_pass = mail_cfg.get('appPass', '')
+                                                        sender = mail_cfg.get('replyEmail') or mail_cfg.get('email', '')
+                                                        sender_pass = mail_cfg.get('replyAppPass') or mail_cfg.get('appPass', '')
                                                         
                                                         if sender and sender_pass:
                                                             subject = mail_action['subject']
@@ -4312,8 +4322,8 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         mail_delay_minutes = mail_action.get('delayMinutes', 30)
                                                         
                                                         # エンゲージ専用のmail_settings取得
-                                                        sender = engage_mail_settings.get('email')
-                                                        sender_pass = engage_mail_settings.get('appPass')
+                                                        sender = engage_mail_settings.get('replyEmail') or engage_mail_settings.get('email')
+                                                        sender_pass = engage_mail_settings.get('replyAppPass') or engage_mail_settings.get('appPass')
                                                         
                                                         if not sender or not sender_pass:
                                                             print('メール送信元の設定が見つかりません（engage_mail_settings）')
@@ -5026,7 +5036,7 @@ if __name__ == '__main__':
     except Exception as e:
         print("\n" + "="*60)
         print("❌ 予期せぬエラーが発生しました (Fatal Error)")
-        print("="*60)
+        print("="*60) 
         print(f"エラー内容: {e}")
         import traceback
         traceback.print_exc()
