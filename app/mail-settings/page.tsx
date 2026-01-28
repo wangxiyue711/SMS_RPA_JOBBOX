@@ -34,9 +34,12 @@ export default function MailSettingsPage() {
   const [siteType, setSiteType] = useState<SiteType>("jobbox");
   const [email, setEmail] = useState("");
   const [appPass, setAppPass] = useState("");
+  const [replyEmail, setReplyEmail] = useState("");
+  const [replyAppPass, setReplyAppPass] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
+  const [showReplyPass, setShowReplyPass] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [fieldError, setFieldError] = useState<{
     field: string;
@@ -60,9 +63,13 @@ export default function MailSettingsPage() {
       const data = snap.data() as any;
       setEmail(data.email || "");
       setAppPass(data.appPass || "");
+      setReplyEmail(data.replyEmail || "");
+      setReplyAppPass(data.replyAppPass || "");
     } else {
       setEmail("");
       setAppPass("");
+      setReplyEmail("");
+      setReplyAppPass("");
     }
     setLoaded(true);
   }
@@ -96,6 +103,37 @@ export default function MailSettingsPage() {
       setLoading(false);
       return;
     }
+
+    // Optional reply sender settings (if provided, validate as a pair)
+    const replyEmailTrim = String(replyEmail || "").trim();
+    const replyPassTrim = String(replyAppPass || "").trim();
+    const hasReplyAny = !!replyEmailTrim || !!replyPassTrim;
+    if (hasReplyAny) {
+      if (!replyEmailTrim) {
+        setFieldError({
+          field: "replyEmail",
+          msg: "返信用メールアドレスを入力してください。",
+        });
+        setLoading(false);
+        return;
+      }
+      if (!emailRe.test(replyEmailTrim)) {
+        setFieldError({
+          field: "replyEmail",
+          msg: "有効なメールアドレスを入力してください。",
+        });
+        setLoading(false);
+        return;
+      }
+      if (!replyPassTrim || replyPassTrim.length !== 16) {
+        setFieldError({
+          field: "replyAppPass",
+          msg: "英数字16文字で入力してください。",
+        });
+        setLoading(false);
+        return;
+      }
+    }
     const user = await waitForAuthReady();
     if (!user) {
       alert("未ログインです。ログインしてください。");
@@ -107,7 +145,13 @@ export default function MailSettingsPage() {
     const collectionName =
       siteType === "jobbox" ? "mail_settings" : "engage_mail_settings";
     const docRef = doc(db, "accounts", uid, collectionName, "settings");
-    await setDoc(docRef, { email, appPass, createdAt: Date.now() });
+    await setDoc(docRef, {
+      email,
+      appPass,
+      replyEmail: replyEmailTrim,
+      replyAppPass: replyPassTrim,
+      createdAt: Date.now(),
+    });
     await loadSetting();
     setSuccessMsg("✅ 保存しました！");
     setFieldError(null);
@@ -125,6 +169,8 @@ export default function MailSettingsPage() {
     await deleteDoc(doc(db, "accounts", uid, collectionName, "settings"));
     setEmail("");
     setAppPass("");
+    setReplyEmail("");
+    setReplyAppPass("");
     setLoaded(true);
   }
 
@@ -297,6 +343,128 @@ export default function MailSettingsPage() {
                   className="password-toggle"
                 >
                   {showPass ? (
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                      <line x1="1" y1="1" x2="23" y2="23" />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+            
+
+            <div style={{ marginTop: 8, fontSize: 13, color: "var(--muted, #666)" }}>
+            
+              ※ 返信に別のメールアドレスを使いたい場合のみ、下の「返信用」も設定してください（未入力なら上の設定を使用します）。
+            </div>
+
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: 6,
+                  fontSize: 14,
+                  fontWeight: 500,
+                }}
+              >
+                返信用メールアドレス（任意）
+              </label>
+              <div className="field-tooltip-wrapper">
+                <input
+                  name="mail_settings_reply_email"
+                  
+                  autoComplete="off"
+                  value={replyEmail}
+                  onChange={(e) => {
+                    setReplyEmail(e.target.value);
+                    if (fieldError && fieldError.field === "replyEmail")
+                      setFieldError(null);
+                  }}
+                  placeholder="reply@company.com"
+                  className="input"
+                  style={{ width: "100%", boxSizing: "border-box" }}
+                />
+                {fieldError && fieldError.field === "replyEmail" && (
+                  <div className="field-tooltip-bubble" aria-hidden>
+                    <div className="field-tooltip-box">
+                      <div className="field-tooltip-icon">!</div>
+                      <div>{fieldError.msg}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: 6,
+                  fontSize: 14,
+                  fontWeight: 500,
+                }}
+              >
+                返信用アプリパスワード（任意）
+              </label>
+              <div className="input-with-icon">
+                <div
+                  className="field-tooltip-wrapper"
+                  style={{ width: "100%" }}
+                >
+                  <input
+                    name="mail_settings_reply_apppass"
+                    autoComplete="new-password"
+                    type={showReplyPass ? "text" : "password"}
+                    value={replyAppPass}
+                    onChange={(e) => {
+                      setReplyAppPass(e.target.value);
+                      if (fieldError && fieldError.field === "replyAppPass")
+                        setFieldError(null);
+                    }}
+                    placeholder="英数字16文字（スペースなし）"
+                    className="input"
+                    style={{ width: "100%", boxSizing: "border-box" }}
+                  />
+                  {fieldError && fieldError.field === "replyAppPass" && (
+                    <div className="field-tooltip-bubble" aria-hidden>
+                      <div className="field-tooltip-box">
+                        <div className="field-tooltip-icon">!</div>
+                        <div>{fieldError.msg}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowReplyPass((s) => !s)}
+                  aria-label={showReplyPass ? "隠す" : "表示"}
+                  className="password-toggle"
+                >
+                  {showReplyPass ? (
                     <svg
                       width="18"
                       height="18"
