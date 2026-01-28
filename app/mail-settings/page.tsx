@@ -375,11 +375,16 @@ export default function MailSettingsPage() {
                 </button>
               </div>
             </div>
-            
 
-            <div style={{ marginTop: 8, fontSize: 13, color: "var(--muted, #666)" }}>
-            
-              ※ 返信に別のメールアドレスを使いたい場合のみ、下の「返信用」も設定してください（未入力なら上の設定を使用します）。
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 13,
+                color: "var(--muted, #666)",
+              }}
+            >
+              ※
+              返信に別のメールアドレスを使いたい場合のみ、下の「返信用」も設定してください（未入力なら上の設定を使用します）。
             </div>
 
             <div>
@@ -396,7 +401,6 @@ export default function MailSettingsPage() {
               <div className="field-tooltip-wrapper">
                 <input
                   name="mail_settings_reply_email"
-                  
                   autoComplete="off"
                   value={replyEmail}
                   onChange={(e) => {
