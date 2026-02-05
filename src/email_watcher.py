@@ -1942,10 +1942,81 @@ def write_sms_history(uid: str, doc: dict) -> bool:
                     write_doc['response'] = final_resp
                 write_doc['status'] = status_str
 
+                # Preserve/append additional fields from incoming doc.
+                # IMPORTANT: This merge path previously patched only a minimal set of fields,
+                # which caused other fields (and newly-added ones like work_prefecture/work_address)
+                # to be missing in Firestore, resulting in blank CSV columns.
+                def _nonempty(v):
+                    if v is None:
+                        return False
+                    if isinstance(v, (int, bool)):
+                        return True
+                    return str(v).strip() != ''
+
+                def _pick_from_doc(*keys):
+                    for kk in keys:
+                        try:
+                            if kk in doc and _nonempty(doc.get(kk)):
+                                return doc.get(kk)
+                        except Exception:
+                            continue
+                    return None
+
+                # Common passthrough fields
+                name_val = _pick_from_doc('name', '氏名')
+                if _nonempty(name_val):
+                    write_doc['name'] = name_val
+                gender_val = _pick_from_doc('gender', '性別')
+                if _nonempty(gender_val):
+                    write_doc['gender'] = gender_val
+                birth_val = _pick_from_doc('birth', '生年月日')
+                if _nonempty(birth_val):
+                    write_doc['birth'] = birth_val
+                age_val = _pick_from_doc('age')
+                if _nonempty(age_val):
+                    write_doc['age'] = age_val
+
+                addr_val = _pick_from_doc('addr', '住所')
+                if _nonempty(addr_val):
+                    write_doc['addr'] = addr_val
+                school_val = _pick_from_doc('school', '学校名')
+                if _nonempty(school_val):
+                    write_doc['school'] = school_val
+
+                # Job title can appear under multiple keys
+                job_title_val = _pick_from_doc('job_title', 'jobTitle', '求人タイトル', 'kyujin', 'title')
+                if _nonempty(job_title_val):
+                    write_doc['job_title'] = job_title_val
+
+                template_val = _pick_from_doc('template')
+                if _nonempty(template_val):
+                    write_doc['template'] = template_val
+
+                # Employer/company
+                employer_val = _pick_from_doc('employer_name', 'employer', '会社名', '企業名', '掲載企業名')
+                if _nonempty(employer_val):
+                    write_doc['employer_name'] = employer_val
+
+                # New: work location (prefecture + address)
+                wp = _pick_from_doc('work_prefecture', 'workPrefecture')
+                wa = _pick_from_doc('work_address', 'workAddress')
+                if _nonempty(wp):
+                    write_doc['work_prefecture'] = wp
+                if _nonempty(wa):
+                    write_doc['work_address'] = wa
+
                 # PATCH existing document
                 try:
                     patch_url = f'https://firestore.googleapis.com/v1/{existing_name}'
-                    r = requests.patch(patch_url, headers={**headers, 'Content-Type': 'application/json'}, json={'fields': _make_fields_for_firestore(write_doc)}, timeout=12)
+                    # Use updateMask to avoid deleting other existing fields.
+                    params = {'updateMask.fieldPaths': ','.join(write_doc.keys())}
+                    r = requests.patch(
+                        patch_url,
+                        headers={**headers, 'Content-Type': 'application/json'},
+                        params=params,
+                        json={'fields': _make_fields_for_firestore(write_doc)},
+                        timeout=12,
+                    )
                     if r.status_code in (200, 201):
                         try:
                             print(f'Merged sms_history into {existing_name} status={write_doc.get("status")}')
@@ -2283,6 +2354,9 @@ def execute_scheduled_sms_task(task, write_history=True):
                 'email': applicant_detail.get('email', ''),
                 'tel': norm,
                 'addr': applicant_detail.get('addr', ''),
+                'employer_name': applicant_detail.get('employer_name', '') or applicant_detail.get('会社名', '') or applicant_detail.get('企業名', ''),
+                'work_prefecture': applicant_detail.get('work_prefecture', '') or applicant_detail.get('workPrefecture', ''),
+                'work_address': applicant_detail.get('work_address', '') or applicant_detail.get('workAddress', ''),
                 'school': applicant_detail.get('school', ''),
                 'oubo_no': oubo_no,
                 'job_title': applicant_detail.get('kyujin') or applicant_detail.get('title') or '',
@@ -2348,6 +2422,9 @@ def execute_scheduled_mail_task(task, write_history=True):
                 'email': to_email,
                 'tel': applicant_detail.get('tel', ''),
                 'addr': applicant_detail.get('addr', ''),
+                'employer_name': applicant_detail.get('employer_name', '') or applicant_detail.get('会社名', '') or applicant_detail.get('企業名', ''),
+                'work_prefecture': applicant_detail.get('work_prefecture', '') or applicant_detail.get('workPrefecture', ''),
+                'work_address': applicant_detail.get('work_address', '') or applicant_detail.get('workAddress', ''),
                 'school': applicant_detail.get('school', ''),
                 'oubo_no': oubo_no,
                 'job_title': applicant_detail.get('kyujin') or applicant_detail.get('title') or '',
@@ -2467,6 +2544,9 @@ def process_scheduled_tasks_once(uid):
                     'email': applicant_detail.get('email', ''),
                     'tel': applicant_detail.get('tel', ''),
                     'addr': applicant_detail.get('addr', ''),
+                    'employer_name': applicant_detail.get('employer_name', '') or applicant_detail.get('会社名', '') or applicant_detail.get('企業名', ''),
+                    'work_prefecture': applicant_detail.get('work_prefecture', '') or applicant_detail.get('workPrefecture', ''),
+                    'work_address': applicant_detail.get('work_address', '') or applicant_detail.get('workAddress', ''),
                     'school': applicant_detail.get('school', ''),
                     'oubo_no': oubo_no,
                     'job_title': applicant_detail.get('kyujin') or applicant_detail.get('title') or '',
@@ -3061,6 +3141,9 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'email': detail.get('email'),
                                                                 'tel': norm,
                                                                 'addr': detail.get('addr'),
+                                                                'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                                 'school': detail.get('school'),
                                                                 'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                                 'job_title': detail.get('kyujin') or '',
@@ -3110,6 +3193,8 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'email': detail.get('email') or detail.get('メール') or detail.get('メールアドレス'),
                                                             'tel': detail.get('tel') or detail.get('電話番号'),
                                                             'addr': detail.get('addr') or detail.get('住所'),
+                                                            'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                            'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                             'school': detail.get('school') or detail.get('学校名'),
                                                         }
                                                     except Exception as e:
@@ -3172,6 +3257,8 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'email': detail.get('email') or detail.get('メール') or detail.get('メールアドレス'),
                                                             'tel': detail.get('tel') or detail.get('電話番号'),
                                                             'addr': detail.get('addr') or detail.get('住所'),
+                                                            'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                            'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                             'school': detail.get('school') or detail.get('学校名'),
                                                         }
                                                     except Exception as e:
@@ -3260,6 +3347,9 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'email': detail.get('email'),
                                                                 'tel': norm,
                                                                 'addr': detail.get('addr'),
+                                                                'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                                 'school': detail.get('school'),
                                                                 'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                                 'job_title': detail.get('kyujin') or detail.get('title') or '',
@@ -3417,6 +3507,9 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'email': detail.get('email'),
                                                             'tel': detail.get('tel') or detail.get('電話番号') or '',
                                                             'addr': detail.get('addr'),
+                                                            'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                            'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                            'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                             'job_title': detail.get('kyujin') or '',
@@ -3532,6 +3625,8 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                     'email': to_email,
                                                                     'tel': detail.get('tel') or detail.get('電話番号') if isinstance(detail, dict) else '',
                                                                     'addr': detail.get('addr') or detail.get('住所') if isinstance(detail, dict) else '',
+                                                                    'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') if isinstance(detail, dict) else '',
+                                                                    'work_address': detail.get('work_address') or detail.get('workAddress') if isinstance(detail, dict) else '',
                                                                     'school': detail.get('school') or detail.get('学校名') if isinstance(detail, dict) else '',
                                                                 }
                                                             except Exception:
@@ -3633,6 +3728,9 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                             'email': detail.get('email'),
                                                                             'tel': detail.get('tel') or detail.get('電話番号') or '',
                                                                             'addr': detail.get('addr'),
+                                                                            'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                            'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                            'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                                             'school': detail.get('school'),
                                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                                             'job_title': detail.get('kyujin') or detail.get('title') or '',
@@ -3723,6 +3821,9 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         'email': detail.get('email'),
                                                         'tel': detail.get('tel') or detail.get('電話番号') or '',
                                                         'addr': detail.get('addr'),
+                                                        'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                        'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                        'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                         'school': detail.get('school'),
                                                         'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                         'job_title': detail.get('kyujin') or detail.get('title') or '',
@@ -3770,6 +3871,9 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'email': detail.get('email'),
                                                             'tel': detail.get('tel') or detail.get('電話番号') or '',
                                                             'addr': detail.get('addr'),
+                                                            'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                            'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                            'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                             'job_title': detail.get('kyujin') or '',
@@ -3801,6 +3905,9 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'email': detail.get('email'),
                                                             'tel': detail.get('tel') or detail.get('電話番号') or '',
                                                             'addr': detail.get('addr'),
+                                                            'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                            'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                            'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                             'job_title': detail.get('kyujin') or '',
@@ -4056,6 +4163,9 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 'email': detail.get('email'),
                                                 'tel': detail.get('tel'),
                                                 'addr': detail.get('addr'),
+                                                'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                 'oubo_no': detail.get('oubo_no'),
                                                 'job_title': detail.get('title') or '',
                                                 'source': 'engage',
@@ -4560,6 +4670,9 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                     'email': detail.get('email'),
                                                     'tel': detail.get('tel'),
                                                     'addr': detail.get('addr'),
+                                                    'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                    'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                    'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                     'oubo_no': detail.get('oubo_no'),
                                                     'job_title': detail.get('title') or '',
                                                     'source': 'engage',

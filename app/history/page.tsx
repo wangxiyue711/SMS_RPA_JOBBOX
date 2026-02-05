@@ -42,10 +42,10 @@ export default function HistoryPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [statusFilters, setStatusFilters] = useState<Set<string>>(
-    new Set(["sent_m", "sent_s", "sent_ms", "failed", "target_out"])
+    new Set(["sent_m", "sent_s", "sent_ms", "failed", "target_out"]),
   );
   const [platformFilters, setPlatformFilters] = useState<Set<string>>(
-    new Set(["jobbox", "engage"])
+    new Set(["jobbox", "engage"]),
   );
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [platformDropdownOpen, setPlatformDropdownOpen] = useState(false);
@@ -115,8 +115,8 @@ export default function HistoryPage() {
             data.status = data.status.includes("送信済")
               ? "送信済（M）"
               : data.status.includes("送信失敗")
-              ? "送信失敗（M）"
-              : `${data.status}（M）`;
+                ? "送信失敗（M）"
+                : `${data.status}（M）`;
           }
           out.push({ id: d.id, source: "mail_history", ...data });
         });
@@ -222,6 +222,8 @@ export default function HistoryPage() {
       "メールアドレス",
       "電話番号",
       "住所",
+      "勤務地（都道府県）",
+      "勤務地",
       "学校名",
       "求人タイトル",
       "応募No",
@@ -262,6 +264,10 @@ export default function HistoryPage() {
       const telRaw = r.tel || r.phone || r.mobilenumber || "";
       const tel = telRaw ? `\t${telRaw}` : "";
       const addr = r.addr || "";
+
+      // 勤務地（都道府県・住所）
+      const workPrefecture = r.work_prefecture || r.workPrefecture || "";
+      const workAddress = r.work_address || r.workAddress || "";
       // 学校名：有些记录中会误填为応募No.
       // 防御性处理：如果格式像応募No（字母数字+连字符分组），或与当前応募No相同，则视为未填写。
       const schoolRaw = r.school || "";
@@ -289,7 +295,7 @@ export default function HistoryPage() {
 
           // 2. Check if it looks like an ID only (existing check)
           const looksLikeOuBo = /^(?:[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)$/.test(
-            sRaw
+            sRaw,
           );
 
           // 3. Check if it equals the candidate (existing check)
@@ -298,7 +304,7 @@ export default function HistoryPage() {
           // 4. Check if it *contains* the candidate, provided the candidate is a valid ID format
           //    (to catch cases where the ID is embedded in a larger string)
           const candidateIsId = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/.test(
-            String(ouboCandidate)
+            String(ouboCandidate),
           );
           const containsOuBo =
             candidateIsId && sRaw.includes(String(ouboCandidate).trim());
@@ -408,7 +414,7 @@ export default function HistoryPage() {
             "No job title found for record:",
             r.id,
             "Available fields:",
-            Object.keys(r)
+            Object.keys(r),
           );
         }
 
@@ -522,6 +528,8 @@ export default function HistoryPage() {
         email,
         tel,
         addr,
+        workPrefecture,
+        workAddress,
         school,
         jobTitle,
         oubo,
@@ -564,7 +572,7 @@ export default function HistoryPage() {
   const toggleSelectAll = () => {
     const currentPageRows = filteredRows.slice(
       page * PAGE_SIZE,
-      (page + 1) * PAGE_SIZE
+      (page + 1) * PAGE_SIZE,
     );
     const currentPageIds = currentPageRows.map((r) => r.id);
     const allSelected = currentPageIds.every((id) => selectedIds.has(id));
@@ -586,7 +594,7 @@ export default function HistoryPage() {
   const isAllSelected = () => {
     const currentPageRows = filteredRows.slice(
       page * PAGE_SIZE,
-      (page + 1) * PAGE_SIZE
+      (page + 1) * PAGE_SIZE,
     );
     if (currentPageRows.length === 0) return false;
     return currentPageRows.every((r) => selectedIds.has(r.id));
@@ -1054,7 +1062,7 @@ export default function HistoryPage() {
                         (
                         {
                           rows.filter(
-                            (r) => getResultCategory(r) === "target_out"
+                            (r) => getResultCategory(r) === "target_out",
                           ).length
                         }
                         )
@@ -1194,7 +1202,7 @@ export default function HistoryPage() {
               {(() => {
                 const slicedRows = filteredRows.slice(
                   page * PAGE_SIZE,
-                  page * PAGE_SIZE + PAGE_SIZE
+                  page * PAGE_SIZE + PAGE_SIZE,
                 );
                 return slicedRows.map((r, idx) => (
                   <tr
@@ -1226,7 +1234,7 @@ export default function HistoryPage() {
                         }
                         // Otherwise extract from combined name string
                         const p = extractNameAndFurigana(
-                          r.name || r.fullName || ""
+                          r.name || r.fullName || "",
                         );
                         return (p.name || r.name || r.fullName || "-")
                           .replace(/[　]+/g, " ")
@@ -1243,7 +1251,7 @@ export default function HistoryPage() {
                         }
                         // Otherwise extract from combined name string
                         const p = extractNameAndFurigana(
-                          r.name || r.fullName || ""
+                          r.name || r.fullName || "",
                         );
                         return (p.furigana || "-")
                           .replace(/[　]+/g, " ")
@@ -1280,7 +1288,7 @@ export default function HistoryPage() {
                         try {
                           // Match patterns like A2-3616-7244 or 123-456-789 or alphanum groups separated by - (at least one dash)
                           const m = String(raw).match(
-                            /[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/
+                            /[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/,
                           );
                           if (m && m[0]) return m[0];
                         } catch (e) {
@@ -1506,7 +1514,7 @@ export default function HistoryPage() {
                       if (!isFinite(n)) return;
                       const total = Math.max(
                         1,
-                        Math.ceil(filteredRows.length / PAGE_SIZE)
+                        Math.ceil(filteredRows.length / PAGE_SIZE),
                       );
                       const p = Math.max(0, Math.min(total - 1, n - 1));
                       setPage(p);
@@ -1527,7 +1535,7 @@ export default function HistoryPage() {
                     if (!isFinite(n)) return;
                     const total = Math.max(
                       1,
-                      Math.ceil(filteredRows.length / PAGE_SIZE)
+                      Math.ceil(filteredRows.length / PAGE_SIZE),
                     );
                     const p = Math.max(0, Math.min(total - 1, n - 1));
                     setPage(p);
@@ -1550,8 +1558,8 @@ export default function HistoryPage() {
                   setPage((p) =>
                     Math.min(
                       p + 1,
-                      Math.floor((filteredRows.length - 1) / PAGE_SIZE)
-                    )
+                      Math.floor((filteredRows.length - 1) / PAGE_SIZE),
+                    ),
                   )
                 }
                 disabled={

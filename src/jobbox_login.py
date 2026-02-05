@@ -669,6 +669,8 @@ return 'NOT_FOUND';
         
         # 新增：获取勤務先名（会社名）
         employer_name = ''
+        work_prefecture = ''
+        work_address = ''
         current_url = self.driver.current_url  # 保存当前页面URL以便返回
         
         try:
@@ -997,6 +999,176 @@ return 'NOT_FOUND';
                 if not employer_name:
                     print("職位詳細ページで勤務先名が見つかりませんでした")
 
+                # 新增：在「働く条件について」->「勤務地」读取 都道府県 与 番地住所
+                try:
+                    print("=== 勤務地（都道府県・住所）を取得中 ===")
+
+                    def _first_visible(elements):
+                        for e in elements or []:
+                            try:
+                                if e and e.is_displayed():
+                                    return e
+                            except Exception:
+                                continue
+                        return None
+
+                    # 1) Find the section that contains 「働く条件について」
+                    conditions_root = None
+                    try:
+                        heading_candidates = self.driver.find_elements(
+                            By.XPATH,
+                            "//*[self::h1 or self::h2 or self::h3 or self::div or self::span][contains(normalize-space(.),'働く条件について')]",
+                        )
+                        heading_el = _first_visible(heading_candidates)
+                        if heading_el:
+                            # climb up to a reasonable container
+                            for anc_xp in (
+                                "./ancestor::section[1]",
+                                "./ancestor::form[1]",
+                                "./ancestor::main[1]",
+                                "./ancestor::div[1]",
+                            ):
+                                try:
+                                    a = heading_el.find_element(By.XPATH, anc_xp)
+                                    if a:
+                                        conditions_root = a
+                                        break
+                                except Exception:
+                                    continue
+                    except Exception:
+                        conditions_root = None
+
+                    root = conditions_root if conditions_root else self.driver
+                    prefix = ".//" if conditions_root else "//"
+
+                    # 2) Find a container around label 「勤務地」
+                    location_container = None
+                    try:
+                        label_candidates = []
+                        try:
+                            label_candidates = root.find_elements(
+                                By.XPATH,
+                                f"{prefix}*[contains(normalize-space(.),'勤務地')]",
+                            )
+                        except Exception:
+                            label_candidates = []
+                        label_el = _first_visible(label_candidates)
+                        if label_el:
+                            for c_xp in (
+                                "./ancestor::div[1]",
+                                "./ancestor::dl[1]",
+                                "./ancestor::tr[1]",
+                                "./ancestor::section[1]",
+                            ):
+                                try:
+                                    c = label_el.find_element(By.XPATH, c_xp)
+                                    if c:
+                                        location_container = c
+                                        break
+                                except Exception:
+                                    continue
+                    except Exception:
+                        location_container = None
+
+                    container = location_container if location_container else root
+
+                    # 3) Prefecture: usually a <select>
+                    try:
+                        select_candidates = []
+                        for xp in (
+                            f"{prefix}label[contains(normalize-space(.),'勤務地')]/following::select[1]",
+                            f"{prefix}*[contains(normalize-space(.),'勤務地')]/following::select[1]",
+                            f"{prefix}select[1]",
+                        ):
+                            try:
+                                select_candidates = container.find_elements(By.XPATH, xp)
+                                sel = _first_visible(select_candidates)
+                                if sel:
+                                    val = (sel.get_attribute('value') or '').strip()
+                                    opt = None
+                                    try:
+                                        # prefer explicitly selected option
+                                        opt = _first_visible(sel.find_elements(By.XPATH, ".//option[@selected][1]"))
+                                    except Exception:
+                                        opt = None
+                                    if (not opt) and val:
+                                        try:
+                                            opt = _first_visible(sel.find_elements(By.XPATH, f".//option[@value={self._xpath_literal(val)}][1]"))
+                                        except Exception:
+                                            opt = None
+                                    if opt:
+                                        work_prefecture = (opt.text or '').strip()
+                                    else:
+                                        work_prefecture = val
+                                    break
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+
+                    # 4) Address: usually a text input next to the select
+                    try:
+                        address_val = ''
+                        input_candidates = []
+                        for xp in (
+                            # best-effort: input after the select within the same container
+                            f"{prefix}select[1]/following::input[1]",
+                            f"{prefix}label[contains(normalize-space(.),'勤務地')]/following::input[1]",
+                            f"{prefix}*[contains(normalize-space(.),'勤務地')]/following::input[1]",
+                        ):
+                            try:
+                                input_candidates = container.find_elements(By.XPATH, xp)
+                                inp = _first_visible(input_candidates)
+                                if inp:
+                                    address_val = (inp.get_attribute('value') or '').strip()
+                                    if address_val:
+                                        break
+                            except Exception:
+                                continue
+
+                        # fallback: pick a likely address input among all visible text inputs
+                        if not address_val:
+                            try:
+                                all_inputs = container.find_elements(
+                                    By.XPATH,
+                                    f"{prefix}input[not(@type) or @type='text' or @type='search']",
+                                )
+                                scored = []
+                                for inp in all_inputs:
+                                    try:
+                                        if not inp.is_displayed():
+                                            continue
+                                        v = (inp.get_attribute('value') or '').strip()
+                                        ph = (inp.get_attribute('placeholder') or '').strip()
+                                        nm = (inp.get_attribute('name') or '').strip().lower()
+                                        iid = (inp.get_attribute('id') or '').strip().lower()
+                                        score = 0
+                                        if '住所' in ph or '番地' in ph:
+                                            score += 50
+                                        if 'address' in nm or 'address' in iid:
+                                            score += 40
+                                        score += min(len(v), 30)
+                                        scored.append((score, v, inp))
+                                    except Exception:
+                                        continue
+                                scored.sort(key=lambda t: t[0], reverse=True)
+                                if scored and scored[0][1]:
+                                    address_val = scored[0][1]
+                            except Exception:
+                                pass
+
+                        work_address = address_val
+                    except Exception:
+                        pass
+
+                    if work_prefecture or work_address:
+                        print(f"勤務地(都道府県): {work_prefecture}")
+                        print(f"勤務地(住所): {work_address}")
+                    else:
+                        print("勤務地情報が見つかりませんでした")
+                except Exception as e:
+                    print(f"勤務地取得エラー: {e}")
+
                 
                 # 個人情報ページに戻る
                 print("個人情報ページに戻ります...")
@@ -1035,7 +1207,9 @@ return 'NOT_FOUND';
             "name": name, "gender": gender, "birth": birth, "email": email, "tel": tel,
             "addr": addr, "school": school, "oubo_dt": oubo_dt, "kyujin": kyujin,
             "oubo_no": oubo_no_val, "oubo_no_extracted": oubo_no_extracted, "oubo_no_ok": oubo_no_ok,
-            "employer_name": employer_name  # 新增勤務先名
+            "employer_name": employer_name,  # 新增勤務先名
+            "work_prefecture": work_prefecture,
+            "work_address": work_address,
         }
 
     def set_memo_and_save(self, memo_text: str = '送信済み'):
