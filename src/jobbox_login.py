@@ -671,6 +671,7 @@ return 'NOT_FOUND';
         employer_name = ''
         work_prefecture = ''
         work_address = ''
+        job_url = ''  # 公開中のページ (求人URL)
         current_url = self.driver.current_url  # 保存当前页面URL以便返回
         
         try:
@@ -744,6 +745,18 @@ return 'NOT_FOUND';
                             
                             link_text = (link.text or '').strip()
                             href = (link.get_attribute('href') or '')
+
+                            # NEW: capture 公開中のページ url (求人URL). There are often two adjacent links:
+                            # job title and 公開中のページ. We only want the latter.
+                            try:
+                                label_text = (link.get_attribute('aria-label') or '').strip()
+                            except Exception:
+                                label_text = ''
+                            match_text = link_text or label_text
+                            if (not job_url) and match_text and ('公開中のページ' in match_text) and href:
+                                job_url = href.strip()
+                                print(f"求人URL(公開中のページ): {job_url}")
+                                continue
                             
                             # 跳过黑名单关键词
                             if any(k in link_text for k in exclude_keywords):
@@ -923,6 +936,47 @@ return 'NOT_FOUND';
                     except: pass
             except Exception as e:
                 print(f"応募求人リンク検索エラー: {e}")
+
+            # Fallback: 公開中のページ のURLだけは、応募求人ブロック内で見つからない場合がある。
+            # その場合でもページ全体（または主コンテナ）から拾う。
+            if not job_url:
+                try:
+                    # Timing on Jobbox can be flaky; retry a few times.
+                    for _ in range(10):
+                        candidates = []
+                        try:
+                            if main_container:
+                                candidates = main_container.find_elements(
+                                    By.XPATH,
+                                    ".//a[contains(., '公開中のページ') and @href]",
+                                )
+                        except Exception:
+                            candidates = []
+
+                        if not candidates:
+                            candidates = self.driver.find_elements(
+                                By.XPATH,
+                                "//a[contains(., '公開中のページ') and @href]",
+                            )
+
+                        for a in candidates:
+                            try:
+                                # For URL capture we don't require displayed; sometimes the link is off-screen.
+                                if not a.is_enabled():
+                                    continue
+                                href = (a.get_attribute('href') or '').strip()
+                                if href:
+                                    job_url = href
+                                    print(f"求人URL(公開中のページ) fallback: {job_url}")
+                                    break
+                            except Exception:
+                                continue
+
+                        if job_url:
+                            break
+                        time.sleep(0.5)
+                except Exception as e:
+                    print(f"求人URL fallback 検索エラー: {e}")
             
             if job_link:
                 # 点击链接进入职位详细页面
@@ -935,6 +989,31 @@ return 'NOT_FOUND';
                 # ページロードを待機
                 time.sleep(2)
                 self._wait(lambda d: d.execute_script('return document.readyState')=='complete', 15)
+
+                # If 公開中のページ URL wasn't found on the personal-info page, try again on the job detail page.
+                if not job_url:
+                    try:
+                        for _ in range(10):
+                            candidates = self.driver.find_elements(
+                                By.XPATH,
+                                "//a[contains(., '公開中のページ') and @href]",
+                            )
+                            for a in candidates:
+                                try:
+                                    if not a.is_enabled():
+                                        continue
+                                    href = (a.get_attribute('href') or '').strip()
+                                    if href:
+                                        job_url = href
+                                        print(f"求人URL(公開中のページ) detail-page: {job_url}")
+                                        break
+                                except Exception:
+                                    continue
+                            if job_url:
+                                break
+                            time.sleep(0.5)
+                    except Exception as e:
+                        print(f"求人URL detail-page 検索エラー: {e}")
                 
                 # 職位詳細ページで勤務先名を検索
                 # 成功実績のあるセレクターを先頭に配置
@@ -1210,6 +1289,7 @@ return 'NOT_FOUND';
             "employer_name": employer_name,  # 新增勤務先名
             "work_prefecture": work_prefecture,
             "work_address": work_address,
+            "job_url": job_url,
         }
 
     def set_memo_and_save(self, memo_text: str = '送信済み'):

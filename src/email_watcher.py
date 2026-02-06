@@ -1988,6 +1988,11 @@ def write_sms_history(uid: str, doc: dict) -> bool:
                 if _nonempty(job_title_val):
                     write_doc['job_title'] = job_title_val
 
+                # New: job posting public URL (求人URL)
+                job_url_val = _pick_from_doc('job_url', 'jobUrl', '求人URL')
+                if _nonempty(job_url_val):
+                    write_doc['job_url'] = job_url_val
+
                 template_val = _pick_from_doc('template')
                 if _nonempty(template_val):
                     write_doc['template'] = template_val
@@ -2360,6 +2365,7 @@ def execute_scheduled_sms_task(task, write_history=True):
                 'school': applicant_detail.get('school', ''),
                 'oubo_no': oubo_no,
                 'job_title': applicant_detail.get('kyujin') or applicant_detail.get('title') or '',
+                'job_url': applicant_detail.get('job_url') or applicant_detail.get('jobUrl') or '',
                 'status': '送信済（S）' if success else '送信失敗（S）',
                 'template': 'scheduled',
                 'response': info if isinstance(info, dict) else {'note': str(info)},
@@ -2428,6 +2434,7 @@ def execute_scheduled_mail_task(task, write_history=True):
                 'school': applicant_detail.get('school', ''),
                 'oubo_no': oubo_no,
                 'job_title': applicant_detail.get('kyujin') or applicant_detail.get('title') or '',
+                'job_url': applicant_detail.get('job_url') or applicant_detail.get('jobUrl') or '',
                 'status': '送信済（M）' if success else '送信失敗（M）',
                 'template': 'scheduled',
                 'response': info if isinstance(info, dict) else {'note': str(info)},
@@ -2550,6 +2557,7 @@ def process_scheduled_tasks_once(uid):
                     'school': applicant_detail.get('school', ''),
                     'oubo_no': oubo_no,
                     'job_title': applicant_detail.get('kyujin') or applicant_detail.get('title') or '',
+                    'job_url': applicant_detail.get('job_url') or applicant_detail.get('jobUrl') or '',
                     'status': status,
                     'template': 'scheduled',
                     'response': combined_response,
@@ -3147,6 +3155,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'school': detail.get('school'),
                                                                 'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                                 'job_title': detail.get('kyujin') or '',
+                                                                'job_url': detail.get('job_url') or detail.get('jobUrl') or '',
                                                                 'status': '送信失敗',
                                                                 'response': {'note': f'invalid phone: {reason}'},
                                                                 'sentAt': int(time.time())
@@ -3181,6 +3190,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'name': detail.get('name'),
                                                             'applicant_name': detail.get('name'),
                                                             'job_title': jt,
+                                                            'job_url': detail.get('job_url') or detail.get('jobUrl') or '',
                                                             'company': company_val,
                                                             'account_name': company_val,
                                                             'employer_name': employer_val,
@@ -3246,6 +3256,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'name': detail.get('name'),
                                                             'applicant_name': detail.get('name'),
                                                             'job_title': jt,
+                                                            'job_url': detail.get('job_url') or detail.get('jobUrl') or '',
                                                             'company': company_val,
                                                             'account_name': company_val,
                                                             'employer_name': employer_val,
@@ -3353,6 +3364,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'school': detail.get('school'),
                                                                 'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                                 'job_title': detail.get('kyujin') or detail.get('title') or '',
+                                                                'job_url': detail.get('job_url') or detail.get('jobUrl') or '',
                                                                 'status': rec_status,
                                                                 'template': sms_target_segment.get('title') if sms_target_segment else 'unknown',
                                                                 'response': info if isinstance(info, dict) else {'note': str(info)},
@@ -3607,6 +3619,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                     'name': applicant_name,
                                                                     '氏名': applicant_name,
                                                                     'job_title': job_title_val,
+                                                                    'job_url': (detail.get('job_url') or detail.get('jobUrl') or '') if isinstance(detail, dict) else '',
                                                                     'position': job_title_val,
                                                                     '求人タイトル': job_title_val,
                                                                     '職種': job_title_val,
@@ -3734,6 +3747,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                             'school': detail.get('school'),
                                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                                             'job_title': detail.get('kyujin') or detail.get('title') or '',
+                                                                            'job_url': detail.get('job_url') or detail.get('jobUrl') or '',
                                                                             'status': '送信済（M）' if mail_ok else '送信失敗（M）',  # M for Mail
                                                                             'response': mail_info if isinstance(mail_info, dict) else {'note': str(mail_info)},
                                                                             'sentAt': int(time.time())
@@ -3827,6 +3841,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         'school': detail.get('school'),
                                                         'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                         'job_title': detail.get('kyujin') or detail.get('title') or '',
+                                                        'job_url': detail.get('job_url') or detail.get('jobUrl') or '',
                                                         'status': combined_status,
                                                         'response': combined_response if combined_response else {'note': 'combined attempt'},
                                                         'sentAt': int(time.time())
@@ -3877,6 +3892,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                             'job_title': detail.get('kyujin') or '',
+                                                            'job_url': detail.get('job_url') or detail.get('jobUrl') or '',
                                                             'status': mail_status,
                                                             'response': mail_sent_info if isinstance(mail_sent_info, dict) else {'note': str(mail_sent_info)},
                                                             'sentAt': int(time.time())
@@ -3911,6 +3927,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no') or detail.get('応募No') or detail.get('oubo_no_extracted'),
                                                             'job_title': detail.get('kyujin') or '',
+                                                            'job_url': detail.get('job_url') or detail.get('jobUrl') or '',
                                                             'status': '対象外',
                                                             'response': {'note': 'evaluated as not target'},
                                                             'sentAt': int(time.time())
