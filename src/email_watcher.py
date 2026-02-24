@@ -2610,24 +2610,43 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
         print(f'[{label}] ❌ ログイン失敗: {e}')
         return
 
+    def reconnect_mailbox(reason):
+        nonlocal conn
+        print(f'[{label}] ⚠️  IMAP接続状態異常: {reason}')
+        print(f'[{label}] 再接続を試みます...')
+        try:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+            conn = imaplib.IMAP4_SSL(imap_host)
+            conn.login(email_user, email_pass)
+            select_status, _ = conn.select(folder)
+            if select_status != 'OK':
+                raise imaplib.IMAP4.error(f'select failed: {select_status}')
+            print(f'[{label}] ✓ 再接続成功')
+            return True
+        except Exception as reconnect_err:
+            print(f'[{label}] ❌ 再接続失敗: {reconnect_err}')
+            return False
+
     try:
         while True:
             try:
-                conn.select(folder)
+                select_status, _ = conn.select(folder)
+                if select_status != 'OK':
+                    raise imaplib.IMAP4.error(f'select failed: {select_status}')
                 # 查找所有未读邮件
                 status, data = conn.search(None, 'UNSEEN')
-            except (imaplib.IMAP4.abort, socket.error, ConnectionResetError) as e:
-                print(f'[{label}] ⚠️  IMAP接続が切断されました: {e}')
-                print(f'[{label}] 再接続を試みます...')
-                try:
-                    conn = imaplib.IMAP4_SSL(imap_host)
-                    conn.login(email_user, email_pass)
-                    conn.select(folder)
-                    print(f'[{label}] ✓ 再接続成功')
-                    status, data = conn.search(None, 'UNSEEN')
-                except Exception as reconnect_err:
-                    print(f'[{label}] ❌ 再接続失敗: {reconnect_err}')
+            except (imaplib.IMAP4.abort, imaplib.IMAP4.error, socket.error, ConnectionResetError, OSError) as e:
+                if not reconnect_mailbox(e):
                     time.sleep(poll_seconds)
+                    continue
+                try:
+                    status, data = conn.search(None, 'UNSEEN')
+                except (imaplib.IMAP4.abort, imaplib.IMAP4.error, socket.error, ConnectionResetError, OSError) as retry_err:
+                    if not reconnect_mailbox(retry_err):
+                        time.sleep(poll_seconds)
                     continue
 
             if status != 'OK':
@@ -2646,18 +2665,14 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                 # 先只抓头部，避免把非目标邮件标记为已读
                 try:
                     status, msg_data = conn.fetch(num, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
-                except (imaplib.IMAP4.abort, socket.error, ConnectionResetError) as e:
-                    print(f'[{label}] ⚠️  IMAP接続が切断されました(fetch中): {e}')
-                    print(f'[{label}] 再接続を試みます...')
+                except (imaplib.IMAP4.abort, imaplib.IMAP4.error, socket.error, ConnectionResetError, OSError) as e:
+                    if not reconnect_mailbox(f'fetch中: {e}'):
+                        break  # 退出当前循环，等待下次监视周期
                     try:
-                        conn = imaplib.IMAP4_SSL(imap_host)
-                        conn.login(email_user, email_pass)
-                        conn.select(folder)
-                        print(f'[{label}] ✓ 再接続成功')
                         # 再次尝试fetch
                         status, msg_data = conn.fetch(num, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
-                    except Exception as reconnect_err:
-                        print(f'[{label}] ❌ 再接続失敗: {reconnect_err}')
+                    except (imaplib.IMAP4.abort, imaplib.IMAP4.error, socket.error, ConnectionResetError, OSError) as reconnect_err:
+                        print(f'[{label}] ❌ fetch再試行失敗: {reconnect_err}')
                         break  # 退出当前循环，等待下次监视周期
                         
                 if status != 'OK' or not msg_data:
