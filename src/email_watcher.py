@@ -74,7 +74,8 @@ def parse_jobbox_body(body):
     m = re.search(r'【?アカウント名】?[:：\s]*\s*(.+)', body)
     if m:
         account_name = m.group(1).strip()
-    m = re.search(r'【?アカウントID】?[:：\s]*\s*(.+)', body)
+    # アカウントID: 严格匹配 4位数字-4位数字 格式
+    m = re.search(r'【?アカウントID】?[:：\s]*\s*(\d{4}-\d{4})', body)
     if m:
         account_id = m.group(1).strip()
     m = re.search(r'【?求人タイトル】?[:：\s]*\s*(.+)', body)
