@@ -14,6 +14,7 @@ import { onAuthStateChanged } from "firebase/auth";
 
 type AccountRow = {
   account_name: string;
+  account_id: string;
   jobbox_id: string;
   jobbox_password: string;
 };
@@ -30,6 +31,7 @@ export default function RPASettingsPage() {
   const [siteType, setSiteType] = useState<SiteType>("jobbox");
   const [formData, setFormData] = useState<AccountRow>({
     account_name: "",
+    account_id: "",
     jobbox_id: "",
     jobbox_password: "",
   });
@@ -138,7 +140,7 @@ export default function RPASettingsPage() {
 
       if (siteType === "jobbox") {
         const valid = rows.filter(
-          (r) => r.account_name && r.jobbox_id && r.jobbox_password
+          (r) => r.account_name && r.account_id && r.jobbox_id && r.jobbox_password
         );
         if (valid.length === 0) throw new Error("入力してください");
         await Promise.all(
@@ -146,7 +148,7 @@ export default function RPASettingsPage() {
             addDoc(collection(db, "accounts", uid, "jobbox_accounts"), r)
           )
         );
-        setFormData({ account_name: "", jobbox_id: "", jobbox_password: "" });
+        setFormData({ account_name: "", account_id: "", jobbox_id: "", jobbox_password: "" });
       } else {
         // engage
         if (
@@ -323,6 +325,31 @@ export default function RPASettingsPage() {
                 style={{ width: "100%", boxSizing: "border-box" }}
               />
             </div>
+
+            {siteType === "jobbox" && (
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: 6,
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  アカウントID
+                </label>
+                <input
+                  name="jobbox_account_id"
+                  autoComplete="off"
+                  value={rows[0]?.account_id || ""}
+                  onChange={(e) => updateRow(0, "account_id", e.target.value)}
+                  placeholder="メールに記載のアカウントID"
+                  required
+                  className="input"
+                  style={{ width: "100%", boxSizing: "border-box" }}
+                />
+              </div>
+            )}
 
             <div
               style={{
@@ -523,6 +550,19 @@ export default function RPASettingsPage() {
                   >
                     {s.account_name}
                   </div>
+                  {siteType === "jobbox" && (s as any).account_id && (
+                    <div
+                      style={{
+                        color: "var(--muted, #666)",
+                        fontSize: 12,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      ID: {(s as any).account_id}
+                    </div>
+                  )}
                   <div
                     style={{
                       color: "var(--muted, #666)",

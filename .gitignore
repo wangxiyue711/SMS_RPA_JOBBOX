@@ -36,5 +36,15 @@ Thumbs.db
 # Local config / secrets
 config/accounts.json
 
+# Service account secrets (local only)
+service-account/
+src/service-account/
+src/service-account
+
+# Chrome profiles (generated caches + login artifacts; local only)
+chrome_profiles/
+src/chrome_profiles/
+
 # Temp caches under %USERPROFILE%
 %USERPROFILE%/AppData/Local/Temp/
+logs

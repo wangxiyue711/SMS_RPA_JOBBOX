@@ -2,6 +2,10 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
+REM Force Python to use UTF-8 for stdout/stderr (helps keep emoji output stable)
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+
 REM Auto-restart watcher for email_watcher.py
 if not exist "logs" mkdir "logs"
 
@@ -44,7 +48,8 @@ echo [%date% %time%] Starting email_watcher.py... >> "logs\watcher.log"
 echo [%date% %time%] Starting email_watcher.py...
 
 REM Start python process with visible window
-start "EmailWatcher" .venv\Scripts\python.exe -u src\email_watcher.py --uid %USER_UID% --interval %USER_INTERVAL%
+REM NOTE: `start` opens a new console that may default back to cp932; run `chcp 65001` inside it.
+start "EmailWatcher" cmd /c "chcp 65001>nul & set PYTHONUTF8=1 & set PYTHONIOENCODING=utf-8 & if not exist logs mkdir logs & .venv\Scripts\python.exe -u src\email_watcher.py --uid %USER_UID% --interval %USER_INTERVAL% 1>>logs\emailwatcher_console.log 2>&1 & if errorlevel 1 (echo. & echo [ERROR] email_watcher.py が異常終了しました。logs\emailwatcher_console.log を確認してください。 & pause)"
 
 REM Give it a moment to initialize
 timeout /t 5 >nul

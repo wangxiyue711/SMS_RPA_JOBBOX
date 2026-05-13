@@ -1,2 +1,5 @@
 selenium
 imapclient
+requests
+google-auth
+beautifulsoup4

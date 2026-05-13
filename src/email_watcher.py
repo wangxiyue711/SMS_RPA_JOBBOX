@@ -2610,43 +2610,24 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
         print(f'[{label}] ❌ ログイン失敗: {e}')
         return
 
-    def reconnect_mailbox(reason):
-        nonlocal conn
-        print(f'[{label}] ⚠️  IMAP接続状態異常: {reason}')
-        print(f'[{label}] 再接続を試みます...')
-        try:
-            try:
-                conn.logout()
-            except Exception:
-                pass
-            conn = imaplib.IMAP4_SSL(imap_host)
-            conn.login(email_user, email_pass)
-            select_status, _ = conn.select(folder)
-            if select_status != 'OK':
-                raise imaplib.IMAP4.error(f'select failed: {select_status}')
-            print(f'[{label}] ✓ 再接続成功')
-            return True
-        except Exception as reconnect_err:
-            print(f'[{label}] ❌ 再接続失敗: {reconnect_err}')
-            return False
-
     try:
         while True:
             try:
-                select_status, _ = conn.select(folder)
-                if select_status != 'OK':
-                    raise imaplib.IMAP4.error(f'select failed: {select_status}')
+                conn.select(folder)
                 # 查找所有未读邮件
                 status, data = conn.search(None, 'UNSEEN')
-            except (imaplib.IMAP4.abort, imaplib.IMAP4.error, socket.error, ConnectionResetError, OSError) as e:
-                if not reconnect_mailbox(e):
-                    time.sleep(poll_seconds)
-                    continue
+            except (imaplib.IMAP4.abort, socket.error, ConnectionResetError) as e:
+                print(f'[{label}] ⚠️  IMAP接続が切断されました: {e}')
+                print(f'[{label}] 再接続を試みます...')
                 try:
+                    conn = imaplib.IMAP4_SSL(imap_host)
+                    conn.login(email_user, email_pass)
+                    conn.select(folder)
+                    print(f'[{label}] ✓ 再接続成功')
                     status, data = conn.search(None, 'UNSEEN')
-                except (imaplib.IMAP4.abort, imaplib.IMAP4.error, socket.error, ConnectionResetError, OSError) as retry_err:
-                    if not reconnect_mailbox(retry_err):
-                        time.sleep(poll_seconds)
+                except Exception as reconnect_err:
+                    print(f'[{label}] ❌ 再接続失敗: {reconnect_err}')
+                    time.sleep(poll_seconds)
                     continue
 
             if status != 'OK':
@@ -2665,14 +2646,18 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                 # 先只抓头部，避免把非目标邮件标记为已读
                 try:
                     status, msg_data = conn.fetch(num, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
-                except (imaplib.IMAP4.abort, imaplib.IMAP4.error, socket.error, ConnectionResetError, OSError) as e:
-                    if not reconnect_mailbox(f'fetch中: {e}'):
-                        break  # 退出当前循环，等待下次监视周期
+                except (imaplib.IMAP4.abort, socket.error, ConnectionResetError) as e:
+                    print(f'[{label}] ⚠️  IMAP接続が切断されました(fetch中): {e}')
+                    print(f'[{label}] 再接続を試みます...')
                     try:
+                        conn = imaplib.IMAP4_SSL(imap_host)
+                        conn.login(email_user, email_pass)
+                        conn.select(folder)
+                        print(f'[{label}] ✓ 再接続成功')
                         # 再次尝试fetch
                         status, msg_data = conn.fetch(num, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
-                    except (imaplib.IMAP4.abort, imaplib.IMAP4.error, socket.error, ConnectionResetError, OSError) as reconnect_err:
-                        print(f'[{label}] ❌ fetch再試行失敗: {reconnect_err}')
+                    except Exception as reconnect_err:
+                        print(f'[{label}] ❌ 再接続失敗: {reconnect_err}')
                         break  # 退出当前循环，等待下次监视周期
                         
                 if status != 'OK' or not msg_data:
@@ -2833,11 +2818,12 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                     for d in docs:
                                         flds = d.get('fields', {})
                                         an = flds.get('account_name', {}).get('stringValue')
+                                        aid = flds.get('account_id', {}).get('stringValue')
                                         jid = flds.get('jobbox_id', {}).get('stringValue')
                                         jpwd = flds.get('jobbox_password', {}).get('stringValue')
                                         if an:
                                             names.append(an)
-                                            accounts.append({'account_name': an, 'jobbox_id': jid, 'jobbox_password': jpwd})
+                                            accounts.append({'account_name': an, 'account_id': aid, 'jobbox_id': jid, 'jobbox_password': jpwd})
                                     page_token = data.get('nextPageToken')
                                     if not page_token:
                                         break
@@ -2856,6 +2842,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                         remote_accounts = get_jobbox_accounts(uid)
                         match_account = None
                         parsed_name = (parsed.get('account_name') or '').strip()
+                        parsed_id = (parsed.get('account_id') or '').strip()
                         import re  # Ensure re module is available in this scope
 
                         def _norm(s: str) -> str:
@@ -2878,16 +2865,33 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
 
                         parsed_norm = _norm(parsed_name)
 
-                        # Only accept exact normalized match. No suffix stripping, no contains.
+                        # Match by both account_name and account_id (if account_id present in email)
                         for ra in remote_accounts:
                             ra_name = ra.get('account_name') or ''
                             ra_norm = _norm(ra_name)
-                            if ra_norm and ra_norm == parsed_norm:
+                            ra_id = (ra.get('account_id') or '').strip()
+                            
+                            # account_name must match (normalized)
+                            if not (ra_norm and ra_norm == parsed_norm):
+                                continue
+                            
+                            # If email contains account_id, it must also match exactly
+                            if parsed_id:
+                                if ra_id == parsed_id:
+                                    match_account = ra
+                                    print(f"[{label}] アカウントが見つかりました: {ra_name} (ID: {ra_id})")
+                                    break
+                            else:
+                                # No account_id in email, just match by name (backward compatibility)
                                 match_account = ra
+                                print(f"[{label}] アカウントが見つかりました: {ra_name} (アカウントIDなし)")
                                 break
 
                         if not match_account:
-                            print(f"[{label}] メール内のアカウント名 '{parsed_name}' は jobbox_accounts に見つかりませんでした。自動ログインをスキップします。")
+                            if parsed_id:
+                                print(f"[{label}] メール内のアカウント名 '{parsed_name}' & アカウントID '{parsed_id}' は jobbox_accounts に見つかりませんでした。自動ログインをスキップします。")
+                            else:
+                                print(f"[{label}] メール内のアカウント名 '{parsed_name}' は jobbox_accounts に見つかりませんでした。自動ログインをスキップします。")
                             continue
 
                         try:
