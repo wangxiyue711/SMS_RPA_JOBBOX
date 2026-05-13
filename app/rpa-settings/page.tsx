@@ -9,6 +9,7 @@ import {
   getDocs,
   deleteDoc,
   doc,
+  updateDoc,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -48,6 +49,9 @@ export default function RPASettingsPage() {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingData, setEditingData] = useState<any>(null);
+  const [editOpen, setEditOpen] = useState(false);
 
   // For compatibility with existing code
   const rows = [formData];
@@ -193,6 +197,57 @@ export default function RPASettingsPage() {
       await loadSaved();
     } catch (e: any) {
       console.error("delete error", e);
+    }
+  };
+
+  const handleEdit = (account: any) => {
+    setEditingId(account.id);
+    setEditingData({ ...account });
+    setEditOpen(true);
+  };
+
+  const handleUpdate = async () => {
+    if (!editingId || !editingData) return;
+    setLoading(true);
+    setError("");
+    try {
+      const auth = getClientAuth();
+      if (!auth || !auth.currentUser) throw new Error("ログインしてください");
+      const uid = auth.currentUser.uid;
+      const db = getFirestore();
+      const collectionName =
+        siteType === "jobbox" ? "jobbox_accounts" : "engage_accounts";
+      
+      const updateData: any = {};
+      if (siteType === "jobbox") {
+        if (!editingData.account_name || !editingData.account_id || !editingData.jobbox_id || !editingData.jobbox_password) {
+          throw new Error("すべてのフィールドを入力してください");
+        }
+        updateData.account_name = editingData.account_name;
+        updateData.account_id = editingData.account_id;
+        updateData.jobbox_id = editingData.jobbox_id;
+        updateData.jobbox_password = editingData.jobbox_password;
+      } else {
+        if (!editingData.account_name || !editingData.engage_id || !editingData.engage_password) {
+          throw new Error("すべてのフィールドを入力してください");
+        }
+        updateData.account_name = editingData.account_name;
+        updateData.engage_id = editingData.engage_id;
+        updateData.engage_password = editingData.engage_password;
+      }
+      
+      await updateDoc(doc(db, "accounts", uid, collectionName, editingId), updateData);
+      await loadSaved();
+      setEditOpen(false);
+      setEditingId(null);
+      setEditingData(null);
+      setSuccess("✅ 更新しました！");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (err: any) {
+      console.error("update error", err);
+      setError(err?.message || "エラー");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -343,7 +398,7 @@ export default function RPASettingsPage() {
                   autoComplete="off"
                   value={rows[0]?.account_id || ""}
                   onChange={(e) => updateRow(0, "account_id", e.target.value)}
-                  placeholder="メールに記載のアカウントID"
+                  placeholder="1234-0000"
                   required
                   className="input"
                   style={{ width: "100%", boxSizing: "border-box" }}
@@ -685,7 +740,49 @@ export default function RPASettingsPage() {
                     </button>
                   </div>
 
-                  <div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => handleEdit(s)}
+                      aria-label="編集"
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        padding: 6,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "var(--shade-1)",
+                        width: 32,
+                        height: 32,
+                        lineHeight: 0,
+                      }}
+                    >
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                        style={{ display: "block" }}
+                      >
+                        <path
+                          d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                    
                     <button
                       onClick={() => {
                         setConfirmId(s.id);
@@ -817,6 +914,228 @@ export default function RPASettingsPage() {
                 }}
               >
                 削除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Edit Dialog */}
+      {editOpen && editingData && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.35)",
+            zIndex: 9999,
+            padding: 20,
+            overflowY: "auto",
+          }}
+          onClick={() => {
+            setEditOpen(false);
+            setEditingId(null);
+            setEditingData(null);
+            setError("");
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#fff",
+              padding: 28,
+              borderRadius: 12,
+              minWidth: 400,
+              maxWidth: 600,
+              width: "100%",
+              boxShadow: "0 12px 28px rgba(0,0,0,0.15)",
+              margin: "auto",
+            }}
+          >
+            <div style={{ marginBottom: 20, fontWeight: 700, fontSize: 20 }}>
+              アカウント編集
+            </div>
+
+            <div style={{ display: "grid", gap: 16, marginBottom: 20 }}>
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: 6,
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  {siteType === "jobbox"
+                    ? "求人ボックスアカウント名"
+                    : "エンゲージアカウント名"}
+                </label>
+                <input
+                  autoComplete="off"
+                  value={editingData.account_name || ""}
+                  onChange={(e) =>
+                    setEditingData({ ...editingData, account_name: e.target.value })
+                  }
+                  placeholder="xxx株式会社"
+                  className="input"
+                  style={{ width: "100%", boxSizing: "border-box" }}
+                />
+              </div>
+
+              {siteType === "jobbox" && (
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: 6,
+                      fontSize: 14,
+                      fontWeight: 500,
+                    }}
+                  >
+                    アカウントID
+                  </label>
+                  <input
+                    autoComplete="off"
+                    value={editingData.account_id || ""}
+                    onChange={(e) =>
+                      setEditingData({ ...editingData, account_id: e.target.value })
+                    }
+                    placeholder="1234-0000"
+                    className="input"
+                    style={{ width: "100%", boxSizing: "border-box" }}
+                  />
+                </div>
+              )}
+
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: 6,
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  メールアドレス
+                </label>
+                <input
+                  autoComplete="off"
+                  value={
+                    siteType === "jobbox"
+                      ? editingData.jobbox_id || ""
+                      : editingData.engage_id || ""
+                  }
+                  onChange={(e) => {
+                    if (siteType === "jobbox") {
+                      setEditingData({ ...editingData, jobbox_id: e.target.value });
+                    } else {
+                      setEditingData({ ...editingData, engage_id: e.target.value });
+                    }
+                  }}
+                  placeholder="sample@sample-job.biz"
+                  className="input"
+                  style={{ width: "100%", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: 6,
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  パスワード
+                </label>
+                <input
+                  autoComplete="new-password"
+                  type="text"
+                  value={
+                    siteType === "jobbox"
+                      ? editingData.jobbox_password || ""
+                      : editingData.engage_password || ""
+                  }
+                  onChange={(e) => {
+                    if (siteType === "jobbox") {
+                      setEditingData({
+                        ...editingData,
+                        jobbox_password: e.target.value,
+                      });
+                    } else {
+                      setEditingData({
+                        ...editingData,
+                        engage_password: e.target.value,
+                      });
+                    }
+                  }}
+                  placeholder="パスワードを入力してください"
+                  className="input"
+                  style={{ width: "100%", boxSizing: "border-box" }}
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div
+                style={{
+                  color: "red",
+                  marginBottom: 16,
+                  fontSize: 14,
+                }}
+              >
+                {error}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 12 }}>
+              <button
+                onClick={() => {
+                  setEditOpen(false);
+                  setEditingId(null);
+                  setEditingData(null);
+                  setError("");
+                }}
+                disabled={loading}
+                style={{
+                  flex: 1,
+                  background: "#fff",
+                  border: "1px solid rgba(0,0,0,0.12)",
+                  color: "#111",
+                  padding: "12px 16px",
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  cursor: loading ? "not-allowed" : "pointer",
+                  opacity: loading ? 0.6 : 1,
+                }}
+              >
+                キャンセル
+              </button>
+
+              <button
+                onClick={handleUpdate}
+                disabled={loading}
+                style={{
+                  flex: 1,
+                  background: "rgb(35, 206, 203)",
+                  border: "none",
+                  color: "#fff",
+                  padding: "12px 16px",
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  cursor: loading ? "not-allowed" : "pointer",
+                  opacity: loading ? 0.6 : 1,
+                }}
+              >
+                {loading ? "更新中..." : "更新"}
               </button>
             </div>
           </div>
