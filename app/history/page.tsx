@@ -228,6 +228,8 @@ export default function HistoryPage() {
       "求人タイトル",
       "求人URL",
       "応募No",
+      "アカウント名",
+      "掲載企業",
       "送信日時",
       "送信結果",
     ];
@@ -435,6 +437,17 @@ export default function HistoryPage() {
         return raw;
       })();
 
+      // Extract account name and employer name
+      const accountName =
+        r.account_name || r.accountName || r.アカウント名 || "";
+      const employerName =
+        r.employer_name ||
+        r.employerName ||
+        r.掲載企業名 ||
+        r.企業名 ||
+        r.会社名 ||
+        "";
+
       const sent = (() => {
         const v = r.sentAt || r.sent_at || r.sent_at_seconds || r.sent_at_ts;
         if (v === undefined || v === null) return "";
@@ -537,6 +550,8 @@ export default function HistoryPage() {
         jobTitle,
         jobUrl,
         oubo,
+        accountName,
+        employerName,
         sent,
         result,
       ]
