@@ -1286,7 +1286,8 @@ return 'NOT_FOUND';
             "name": name, "gender": gender, "birth": birth, "email": email, "tel": tel,
             "addr": addr, "school": school, "oubo_dt": oubo_dt, "kyujin": kyujin,
             "oubo_no": oubo_no_val, "oubo_no_extracted": oubo_no_extracted, "oubo_no_ok": oubo_no_ok,
-            "employer_name": employer_name,  # 新增勤務先名
+            "account_name": self.account.get('account_name', ''),  # アカウント名
+            "employer_name": employer_name,  # 新増勤務先名
             "work_prefecture": work_prefecture,
             "work_address": work_address,
             "job_url": job_url,

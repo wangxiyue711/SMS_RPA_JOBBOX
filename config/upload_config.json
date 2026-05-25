@@ -1,0 +1,63 @@
+{
+  "enabled": true,
+  "spreadsheet_id": "1T9_xa3Ej-heRZcQrTcTe2x6PINKP_zEz0mT_Rwf4VTI",
+  "sheet_name": "管理表",
+  "service_account_path": "service-account/service-account",
+  "filters": {
+    "性別": null,
+    "年齢_min": null,
+    "年齢_max": null,
+    "送信結果": null
+  },
+  "gui_filters": {
+    "name_types": {
+      "kanji": true,
+      "katakana": false,
+      "hiragana": true,
+      "alphabet": false
+    },
+    "age_ranges": {
+      "male_min": 18,
+      "male_max": 88,
+      "female_min": 18,
+      "female_max": 88
+    }
+  },
+  "formulas": {
+    "C列(memo3)": "=COUNTIFS($J$3:$J{row},J{row},$I$3:$I{row},I{row})",
+    "B列(memo2)": "=$J{row}&$I{row}&$C{row}",
+    "重複": "=COUNTIF($M:$M,$M{row})"
+  },
+  "column_mapping": {
+    "A列(memo1)": "",
+    "B列(memo2)": "",
+    "C列(memo3)": "",
+    "架電日": "",
+    "CA架電担当": "",
+    "CS備考": "",
+    "メール": "",
+    "LINE": "",
+    "進捗": "",
+    "担当CA": "",
+    "氏名": "name",
+    "フリガナ": "furigana",
+    "電話番号": "tel",
+    "アドレス": "email",
+    "生年月日": "birth",
+    "年齢": "age",
+    "性別": "gender",
+    "学歴": "school",
+    "居住地": "addr",
+    "転居": "",
+    "転居備考": "勤務地",
+    "応募日": "sent_at",
+    "面談日": "",
+    "面談時間": "",
+    "流入": "account_name",
+    "応募項目": "job_title",
+    "掲載企業": "employer_name",
+    "担当CS": "",
+    "備考": "",
+    "重複": ""
+  }
+}

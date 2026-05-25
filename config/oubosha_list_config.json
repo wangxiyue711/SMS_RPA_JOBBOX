@@ -1,0 +1,27 @@
+{
+  "enabled": true, 
+  "spreadsheet_id": "1aaoZOp-dTR_axwSVKaeLmv6pKPDPZ5giZeO-RYU_vGI",
+  "sheet_name": "応募者リスト",
+  "service_account_path": "service-account/service-account",
+  "column_mapping": {
+    "memo": "",
+    "ステータス": "",
+    "応募者名": "name",
+    "フリガナ": "furigana",
+    "電話番号": "tel",
+    "性別": "gender",
+    "生年月日": "birth",
+    "年齢": "age",
+    "居住地": "addr",
+    "会社名": "employer_name",
+    "職種名": "job_title",
+    "勤務地": "勤務地",
+    "応募日": "応募日",
+    "応募時間": "応募時間",
+    "担当CA": "",
+    "面談日": "",
+    "面談時間": "",
+    "備考": ""
+  }
+}
+

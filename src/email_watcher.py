@@ -19,6 +19,14 @@ import traceback
 import socket
 import html
 
+# 导入Sheet即时上传功能
+try:
+    from sheet_uploader import upload_applicant_to_kanri_sheet, upload_applicant_to_oubosha_list
+    SHEET_UPLOADER_AVAILABLE = True
+except ImportError:
+    SHEET_UPLOADER_AVAILABLE = False
+    print("Warning: sheet_uploader not available, Sheet即时上传功能将被禁用")
+
 # ============ 固定URL配置 ============
 # 求人ボックスのログインページURL（メールから取得しなくなったため固定）
 JOBBOX_LOGIN_URL = 'https://secure.kyujinbox.com/login'
@@ -61,6 +69,29 @@ def decode_subject(raw):
         else:
             subject += part
     return subject
+
+
+def parse_email_date(msg) -> Optional[int]:
+    """Parse email Date header and return Unix timestamp.
+    
+    Args:
+        msg: email.message.Message object
+        
+    Returns:
+        Unix timestamp (seconds) or None if parsing fails
+    """
+    try:
+        import email.utils
+        date_str = msg.get('Date')
+        if not date_str:
+            return None
+        # parsedate_to_datetime converts to timezone-aware datetime
+        dt = email.utils.parsedate_to_datetime(date_str)
+        if dt:
+            return int(dt.timestamp())
+    except Exception:
+        pass
+    return None
 
 
 def parse_jobbox_body(body):
@@ -2360,6 +2391,7 @@ def execute_scheduled_sms_task(task, write_history=True):
                 'email': applicant_detail.get('email', ''),
                 'tel': norm,
                 'addr': applicant_detail.get('addr', ''),
+                'account_name': applicant_detail.get('account_name', '') or applicant_detail.get('アカウント名', ''),
                 'employer_name': applicant_detail.get('employer_name', '') or applicant_detail.get('会社名', '') or applicant_detail.get('企業名', ''),
                 'work_prefecture': applicant_detail.get('work_prefecture', '') or applicant_detail.get('workPrefecture', ''),
                 'work_address': applicant_detail.get('work_address', '') or applicant_detail.get('workAddress', ''),
@@ -2429,6 +2461,7 @@ def execute_scheduled_mail_task(task, write_history=True):
                 'email': to_email,
                 'tel': applicant_detail.get('tel', ''),
                 'addr': applicant_detail.get('addr', ''),
+                'account_name': applicant_detail.get('account_name', '') or applicant_detail.get('アカウント名', ''),
                 'employer_name': applicant_detail.get('employer_name', '') or applicant_detail.get('会社名', '') or applicant_detail.get('企業名', ''),
                 'work_prefecture': applicant_detail.get('work_prefecture', '') or applicant_detail.get('workPrefecture', ''),
                 'work_address': applicant_detail.get('work_address', '') or applicant_detail.get('workAddress', ''),
@@ -2717,6 +2750,13 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                     if not full_bytes:
                         continue
                     msg = email.message_from_bytes(full_bytes)
+                    
+                    # メールの受信日時を取得（応募日/応募時間として使用）
+                    email_received_at = parse_email_date(msg)
+                    if not email_received_at:
+                        # Date headerが取得できない場合は現在時刻を使用
+                        email_received_at = int(time.time())
+                    
                     body = ''
                     if msg.is_multipart():
                         for part in msg.walk():
@@ -2915,6 +2955,15 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                 try:
                                     if info and isinstance(info, dict) and info.get('detail'):
                                         detail = info.get('detail') or {}
+                                        
+                                        # アカウント名をメールから追加（必ず設定）
+                                        if parsed.get('account_name'):
+                                            detail['account_name'] = parsed.get('account_name')
+                                            detail['company'] = parsed.get('account_name')
+                                        
+                                        # 掲載企業名：メールにある場合のみ設定（RPAで取得した値を保持）
+                                        if parsed.get('employer_name'):
+                                            detail['employer_name'] = parsed.get('employer_name')
 
                                         def get_target_settings(uid):
                                             if not uid:
@@ -3089,6 +3138,14 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                             if matching_segment['actions']['mail']['enabled']:
                                                 mail_target_segment = matching_segment
                                         
+                                        # 判断是否应该上传到管理表Sheet（segment名称包含「有効応募」）
+                                        should_upload_to_sheet = False
+                                        if matching_segment and matching_segment.get('title'):
+                                            segment_title = matching_segment['title']
+                                            if '有効応募' in segment_title:
+                                                should_upload_to_sheet = True
+                                                print(f'[{label}] [管理表Sheet] このSegment「{segment_title}」は有効応募のため、Sheetに記録します')
+                                        
                                         # Initialize flags for SMS and Mail (ensure availability in all branches)
                                         sms_attempted = False
                                         sms_ok = False
@@ -3169,6 +3226,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'email': detail.get('email'),
                                                                 'tel': norm,
                                                                 'addr': detail.get('addr'),
+                                                                'account_name': detail.get('account_name') or detail.get('アカウント名') or '',
                                                                 'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
                                                                 'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
                                                                 'work_address': detail.get('work_address') or detail.get('workAddress') or '',
@@ -3183,6 +3241,40 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             ok_write = write_sms_history(str(uid), rec)
                                                             if not ok_write:
                                                                 print(f'[{label}] Failed to write sms_history for invalid phone')
+                                                            
+                                                            # Sheet即時アップロード
+                                                            if SHEET_UPLOADER_AVAILABLE:
+                                                                # 准备共通的应聘者数据
+                                                                applicant_sheet_data = {
+                                                                    'name': detail.get('name'),
+                                                                    'furigana': detail.get('furigana') or detail.get('ふりがな') or '',
+                                                                    'tel': norm,
+                                                                    'email': detail.get('email'),
+                                                                    'gender': detail.get('gender'),
+                                                                    'age': detail.get('age'),
+                                                                    'birth': detail.get('birth'),
+                                                                    'addr': detail.get('addr'),
+                                                                    'account_name': detail.get('account_name') or detail.get('アカウント名') or '',
+                                                                    'job_title': detail.get('kyujin') or detail.get('job_title') or detail.get('求人タイトル') or '',
+                                                                    'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                    'school': detail.get('school'),
+                                                                    'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                    'work_address': detail.get('work_address') or detail.get('workAddress') or '',
+                                                                    'sent_at': email_received_at,
+                                                                }
+                                                                
+                                                                # 1. 管理表Sheet（有効応募のみ）
+                                                                if should_upload_to_sheet:
+                                                                    try:
+                                                                        upload_applicant_to_kanri_sheet(applicant_sheet_data, uid)
+                                                                    except Exception as e:
+                                                                        print(f'[{label}] 管理表Sheet即時アップロード失敗: {e}')
+                                                                
+                                                                # 2. 応募者リスト（全員）
+                                                                try:
+                                                                    upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
+                                                                except Exception as e:
+                                                                    print(f'[{label}] 応募者リスト即時アップロード失敗: {e}')
                                                         except Exception as e:
                                                             print(f'[{label}] Exception when writing sms_history for invalid phone:', e)
                                                 elif sms_send_mode == 'scheduled':
@@ -3378,6 +3470,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 'email': detail.get('email'),
                                                                 'tel': norm,
                                                                 'addr': detail.get('addr'),
+                                                                'account_name': detail.get('account_name') or detail.get('アカウント名') or '',
                                                                 'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
                                                                 'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
                                                                 'work_address': detail.get('work_address') or detail.get('workAddress') or '',
@@ -3396,6 +3489,40 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 ok_write = False
                                                             if not ok_write:
                                                                 print('Failed to write sms_history after send/failure')
+                                                            
+                                                            # Sheet即時アップロード
+                                                            if SHEET_UPLOADER_AVAILABLE:
+                                                                # 准备共通的应聘者数据
+                                                                applicant_sheet_data = {
+                                                                    'name': detail.get('name'),
+                                                                    'furigana': detail.get('furigana') or detail.get('ふりがな') or '',
+                                                                    'tel': norm,
+                                                                    'email': detail.get('email'),
+                                                                    'gender': detail.get('gender'),
+                                                                    'age': detail.get('age'),
+                                                                    'birth': detail.get('birth'),
+                                                                    'addr': detail.get('addr'),
+                                                                    'account_name': detail.get('account_name') or detail.get('アカウント名') or '',
+                                                                    'job_title': detail.get('kyujin') or detail.get('job_title') or detail.get('title') or '',
+                                                                    'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                    'school': detail.get('school'),
+                                                                    'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                    'work_address': detail.get('work_address') or detail.get('workAddress') or '',
+                                                                    'sent_at': email_received_at,
+                                                                }
+                                                                
+                                                                # 1. 管理表Sheet（有効応募のみ）
+                                                                if should_upload_to_sheet:
+                                                                    try:
+                                                                        upload_applicant_to_kanri_sheet(applicant_sheet_data, uid)
+                                                                    except Exception as e:
+                                                                        print(f'[{label}] 管理表Sheet即時アップロード失敗: {e}')
+                                                                
+                                                                # 2. 応募者リスト（全員）
+                                                                try:
+                                                                    upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
+                                                                except Exception as e:
+                                                                    print(f'[{label}] 応募者リスト即時アップロード失敗: {e}')
                                                         except Exception as e:
                                                             print('Exception when writing sms_history (result record):', e)
                                                     # Only write Jobbox memo when candidate is target, send succeeded, exact HTTP 200, and not dry-run
@@ -3539,6 +3666,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'email': detail.get('email'),
                                                             'tel': detail.get('tel') or detail.get('電話番号') or '',
                                                             'addr': detail.get('addr'),
+                                                            'account_name': detail.get('account_name') or detail.get('アカウント名') or '',
                                                             'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
                                                             'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
                                                             'work_address': detail.get('work_address') or detail.get('workAddress') or '',
@@ -3552,6 +3680,40 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         ok_write = write_sms_history(str(uid), rec)
                                                         if not ok_write:
                                                             print('Failed to write sms_history for missing tel/template')
+                                                        
+                                                        # Sheet即時アップロード
+                                                        if SHEET_UPLOADER_AVAILABLE:
+                                                            # 准备共通的应聘者数据
+                                                            applicant_sheet_data = {
+                                                                'name': detail.get('name'),
+                                                                'furigana': detail.get('furigana') or detail.get('ふりがな') or '',
+                                                                'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                                'email': detail.get('email'),
+                                                                'gender': detail.get('gender'),
+                                                                'age': detail.get('age'),
+                                                                'birth': detail.get('birth'),
+                                                                'addr': detail.get('addr'),
+                                                                'account_name': detail.get('account_name') or detail.get('アカウント名') or '',
+                                                                'job_title': detail.get('kyujin') or detail.get('job_title') or '',
+                                                                'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                'school': detail.get('school'),
+                                                                'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                'work_address': detail.get('work_address') or detail.get('workAddress') or '',
+                                                                'sent_at': email_received_at,
+                                                            }
+                                                            
+                                                            # 1. 管理表Sheet（有効応募のみ）
+                                                            if should_upload_to_sheet:
+                                                                try:
+                                                                    upload_applicant_to_kanri_sheet(applicant_sheet_data, uid)
+                                                                except Exception as e:
+                                                                    print(f'[{label}] 管理表Sheet即時アップロード失敗: {e}')
+                                                            
+                                                            # 2. 応募者リスト（全員）
+                                                            try:
+                                                                upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
+                                                            except Exception as e:
+                                                                print(f'[{label}] 応募者リスト即時アップロード失敗: {e}')
                                                     except Exception as e:
                                                         print('Exception when writing sms_history for missing tel/template:', e)
                                         
@@ -3761,6 +3923,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                             'email': detail.get('email'),
                                                                             'tel': detail.get('tel') or detail.get('電話番号') or '',
                                                                             'addr': detail.get('addr'),
+                                                                            'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
                                                                             'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
                                                                             'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
                                                                             'work_address': detail.get('work_address') or detail.get('workAddress') or '',
@@ -3855,6 +4018,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         'email': detail.get('email'),
                                                         'tel': detail.get('tel') or detail.get('電話番号') or '',
                                                         'addr': detail.get('addr'),
+                                                        'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
                                                         'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
                                                         'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
                                                         'work_address': detail.get('work_address') or detail.get('workAddress') or '',
@@ -3870,11 +4034,46 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                     ok_write_combined = write_sms_history(str(uid), rec)
                                                     if not ok_write_combined:
                                                         print('組み合わせ履歴の書き込みに失敗しました')
+                                                    
+                                                    # Sheet即時アップロード
+                                                    if SHEET_UPLOADER_AVAILABLE:
+                                                        # 准备共通的应聘者数据
+                                                        applicant_sheet_data = {
+                                                            'name': detail.get('name'),
+                                                            'furigana': detail.get('furigana') or detail.get('ふりがな') or '',
+                                                            'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                            'email': detail.get('email'),
+                                                            'gender': detail.get('gender'),
+                                                            'age': detail.get('age'),
+                                                            'birth': detail.get('birth'),
+                                                            'addr': detail.get('addr'),
+                                                            'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
+                                                            'job_title': detail.get('kyujin') or detail.get('job_title') or detail.get('title') or '',
+                                                            'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                            'school': detail.get('school'),
+                                                            'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                            'work_address': detail.get('work_address') or detail.get('workAddress') or '',
+                                                            'sent_at': email_received_at,
+                                                        }
+                                                        
+                                                        # 1. 管理表Sheet（有効応募のみ）
+                                                        if should_upload_to_sheet:
+                                                            try:
+                                                                upload_applicant_to_kanri_sheet(applicant_sheet_data, uid)
+                                                            except Exception as e:
+                                                                print(f'[{label}] 管理表Sheet即時アップロード失敗: {e}')
+                                                        
+                                                        # 2. 応募者リスト（全員）
+                                                        try:
+                                                            upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
+                                                        except Exception as e:
+                                                            print(f'[{label}] 応募者リスト即時アップロード失敗: {e}')
                                                 except Exception as e:
                                                     print(f'組み合わせ履歴書き込み例外: {e}')
                                         
                                         else:
                                             # For non-target applicants, use the old mail system (if configured)
+                                            # Note: should_upload_to_sheet is False here (no matching segment with 有効応募)
                                             dry_run_env = os.environ.get('DRY_RUN_SMS', 'false').lower() in ('1', 'true', 'yes')
                                             # Mail auto-reply for non-target (if configured)
                                             try:
@@ -3906,6 +4105,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'email': detail.get('email'),
                                                             'tel': detail.get('tel') or detail.get('電話番号') or '',
                                                             'addr': detail.get('addr'),
+                                                            'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
                                                             'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
                                                             'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
                                                             'work_address': detail.get('work_address') or detail.get('workAddress') or '',
@@ -3920,6 +4120,40 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         ok_write_mail2 = write_sms_history(str(uid), rec)  # Use same table as SMS
                                                         if not ok_write_mail2:
                                                             print('Failed to write mail_history (non-target)')
+                                                        
+                                                        # Sheet即時アップロード
+                                                        if SHEET_UPLOADER_AVAILABLE:
+                                                            # 准备共通的应聘者数据
+                                                            applicant_sheet_data = {
+                                                                'name': detail.get('name'),
+                                                                'furigana': detail.get('furigana') or detail.get('ふりがな') or '',
+                                                                'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                                'email': detail.get('email'),
+                                                                'gender': detail.get('gender'),
+                                                                'age': detail.get('age'),
+                                                                'birth': detail.get('birth'),
+                                                                'addr': detail.get('addr'),
+                                                                'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
+                                                                'job_title': detail.get('kyujin') or detail.get('job_title') or '',
+                                                                'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                'school': detail.get('school'),
+                                                                'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                'work_address': detail.get('work_address') or detail.get('workAddress') or '',
+                                                                'sent_at': email_received_at,
+                                                            }
+                                                            
+                                                            # 1. 管理表Sheet（有効応募のみ - 非対象はshould_upload_to_sheet=False）
+                                                            if should_upload_to_sheet:
+                                                                try:
+                                                                    upload_applicant_to_kanri_sheet(applicant_sheet_data, uid)
+                                                                except Exception as e:
+                                                                    print(f'[{label}] 管理表Sheet即時アップロード失敗: {e}')
+                                                            
+                                                            # 2. 応募者リスト（全員 - 非対象も含む）
+                                                            try:
+                                                                upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
+                                                            except Exception as e:
+                                                                print(f'[{label}] 応募者リスト即時アップロード失敗: {e}')
                                                 except Exception as e:
                                                     print('Exception when writing mail_history (non-target):', e)
                                             except Exception as e:
@@ -3941,6 +4175,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'email': detail.get('email'),
                                                             'tel': detail.get('tel') or detail.get('電話番号') or '',
                                                             'addr': detail.get('addr'),
+                                                            'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
                                                             'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
                                                             'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
                                                             'work_address': detail.get('work_address') or detail.get('workAddress') or '',
@@ -3955,6 +4190,32 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                         ok_write = write_sms_history(str(uid), rec)
                                                         if not ok_write:
                                                             print('Failed to write sms_history for target-out')
+                                                        
+                                                        # Sheet即時アップロード（応募者リストのみ - 対象外も含む）
+                                                        if SHEET_UPLOADER_AVAILABLE:
+                                                            try:
+                                                                applicant_sheet_data = {
+                                                                    'name': detail.get('name'),
+                                                                    'furigana': detail.get('furigana') or detail.get('ふりがな') or '',
+                                                                    'tel': detail.get('tel') or detail.get('電話番号') or '',
+                                                                    'email': detail.get('email'),
+                                                                    'gender': detail.get('gender'),
+                                                                    'age': detail.get('age'),
+                                                                    'birth': detail.get('birth'),
+                                                                    'addr': detail.get('addr'),
+                                                                    'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
+                                                                    'job_title': detail.get('kyujin') or detail.get('job_title') or '',
+                                                                    'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                    'school': detail.get('school'),
+                                                                    'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                    'work_address': detail.get('work_address') or detail.get('workAddress') or '',
+                                                                    'sent_at': email_received_at,
+                                                                }
+                                                                
+                                                                # 応募者リスト（全員 - 対象外も含む）
+                                                                upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
+                                                            except Exception as e:
+                                                                print(f'[{label}] 応募者リスト即時アップロード失敗（対象外）: {e}')
                                                 except Exception as e:
                                                     print('Exception when writing sms_history for target-out:', e)
                                                 # 写入 Jobbox メモ为「RPA:対象外」，如果我们仍然持有 jb 会话且不是 dry-run
@@ -4200,6 +4461,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 'email': detail.get('email'),
                                                 'tel': detail.get('tel'),
                                                 'addr': detail.get('addr'),
+                                                'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
                                                 'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
                                                 'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
                                                 'work_address': detail.get('work_address') or detail.get('workAddress') or '',
@@ -4285,6 +4547,10 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                     'email': detail.get('email'),
                                                                     'tel': norm,
                                                                     'addr': detail.get('addr'),
+                                                                    'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
+                                                                    'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                    'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                    'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                                     'school': detail.get('school'),
                                                                     'oubo_no': detail.get('oubo_no'),
                                                                     'job_title': detail.get('title') or '',
@@ -4443,6 +4709,10 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                     'email': detail.get('email'),
                                                                     'tel': norm,
                                                                     'addr': detail.get('addr'),
+                                                                    'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
+                                                                    'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                    'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                    'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                                     'school': detail.get('school'),
                                                                     'oubo_no': detail.get('oubo_no'),
                                                                     'job_title': detail.get('title') or '',
@@ -4631,6 +4901,10 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                             'email': to_email,
                                                                             'tel': detail.get('tel'),
                                                                             'addr': detail.get('addr'),
+                                                                            'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
+                                                                            'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                                            'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                                            'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                                             'school': detail.get('school'),
                                                                             'oubo_no': detail.get('oubo_no'),
                                                                             'job_title': detail.get('title') or '',
@@ -4679,6 +4953,10 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             'email': detail.get('email'),
                                                             'tel': detail.get('tel'),
                                                             'addr': detail.get('addr'),
+                                                            'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
+                                                            'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
+                                                            'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
+                                                            'work_address': detail.get('work_address') or detail.get('workAddress') or '',
                                                             'school': detail.get('school'),
                                                             'oubo_no': detail.get('oubo_no'),
                                                             'job_title': detail.get('kyujin') or detail.get('title') or '',
@@ -4707,6 +4985,7 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                     'email': detail.get('email'),
                                                     'tel': detail.get('tel'),
                                                     'addr': detail.get('addr'),
+                                                    'account_name': detail.get('account_name') or detail.get('アカウント名') or detail.get('company') or '',
                                                     'employer_name': detail.get('employer_name') or detail.get('会社名') or detail.get('企業名') or '',
                                                     'work_prefecture': detail.get('work_prefecture') or detail.get('workPrefecture') or '',
                                                     'work_address': detail.get('work_address') or detail.get('workAddress') or '',

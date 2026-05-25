@@ -1,5 +1,7 @@
 selenium
+webdriver-manager
 imapclient
 requests
 google-auth
 beautifulsoup4
+gspread
