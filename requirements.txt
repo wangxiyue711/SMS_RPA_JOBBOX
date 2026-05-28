@@ -5,3 +5,4 @@ requests
 google-auth
 beautifulsoup4
 gspread
+notion-client==2.2.1

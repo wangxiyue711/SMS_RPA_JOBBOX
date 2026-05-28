@@ -35,6 +35,7 @@ Thumbs.db
 
 # Local config / secrets
 config/accounts.json
+config/notion_config.json
 
 # Service account secrets (local only)
 service-account/
@@ -48,3 +49,6 @@ src/chrome_profiles/
 # Temp caches under %USERPROFILE%
 %USERPROFILE%/AppData/Local/Temp/
 logs
+
+# Test files with API keys
+test_*.py

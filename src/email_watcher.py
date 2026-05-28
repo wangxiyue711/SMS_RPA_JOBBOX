@@ -27,6 +27,14 @@ except ImportError:
     SHEET_UPLOADER_AVAILABLE = False
     print("Warning: sheet_uploader not available, Sheet即时上传功能将被禁用")
 
+# 导入Notion即时上传功能
+try:
+    from notion_uploader import upload_applicant_to_notion
+    NOTION_UPLOADER_AVAILABLE = True
+except ImportError:
+    NOTION_UPLOADER_AVAILABLE = False
+    print("Warning: notion_uploader not available, Notion即时上传功能将被禁用")
+
 # ============ 固定URL配置 ============
 # 求人ボックスのログインページURL（メールから取得しなくなったため固定）
 JOBBOX_LOGIN_URL = 'https://secure.kyujinbox.com/login'
@@ -3275,6 +3283,13 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                     upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
                                                                 except Exception as e:
                                                                     print(f'[{label}] 応募者リスト即時アップロード失敗: {e}')
+                                                                
+                                                                # 3. Notion（全員）
+                                                                if NOTION_UPLOADER_AVAILABLE:
+                                                                    try:
+                                                                        upload_applicant_to_notion(applicant_sheet_data)
+                                                                    except Exception as e:
+                                                                        print(f'[{label}] Notion即時アップロード失敗: {e}')
                                                         except Exception as e:
                                                             print(f'[{label}] Exception when writing sms_history for invalid phone:', e)
                                                 elif sms_send_mode == 'scheduled':
@@ -3523,6 +3538,13 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                     upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
                                                                 except Exception as e:
                                                                     print(f'[{label}] 応募者リスト即時アップロード失敗: {e}')
+                                                                
+                                                                # 3. Notion（全員）
+                                                                if NOTION_UPLOADER_AVAILABLE:
+                                                                    try:
+                                                                        upload_applicant_to_notion(applicant_sheet_data)
+                                                                    except Exception as e:
+                                                                        print(f'[{label}] Notion即時アップロード失敗: {e}')
                                                         except Exception as e:
                                                             print('Exception when writing sms_history (result record):', e)
                                                     # Only write Jobbox memo when candidate is target, send succeeded, exact HTTP 200, and not dry-run
@@ -3714,6 +3736,13 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
                                                             except Exception as e:
                                                                 print(f'[{label}] 応募者リスト即時アップロード失敗: {e}')
+                                                            
+                                                            # 3. Notion（全員）
+                                                            if NOTION_UPLOADER_AVAILABLE:
+                                                                try:
+                                                                    upload_applicant_to_notion(applicant_sheet_data)
+                                                                except Exception as e:
+                                                                    print(f'[{label}] Notion即時アップロード失敗: {e}')
                                                     except Exception as e:
                                                         print('Exception when writing sms_history for missing tel/template:', e)
                                         
@@ -4068,6 +4097,13 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                             upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
                                                         except Exception as e:
                                                             print(f'[{label}] 応募者リスト即時アップロード失敗: {e}')
+                                                        
+                                                        # 3. Notion（全員）
+                                                        if NOTION_UPLOADER_AVAILABLE:
+                                                            try:
+                                                                upload_applicant_to_notion(applicant_sheet_data)
+                                                            except Exception as e:
+                                                                print(f'[{label}] Notion即時アップロード失敗: {e}')
                                                 except Exception as e:
                                                     print(f'組み合わせ履歴書き込み例外: {e}')
                                         
@@ -4154,6 +4190,13 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                 upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
                                                             except Exception as e:
                                                                 print(f'[{label}] 応募者リスト即時アップロード失敗: {e}')
+                                                            
+                                                            # 3. Notion（全員）
+                                                            if NOTION_UPLOADER_AVAILABLE:
+                                                                try:
+                                                                    upload_applicant_to_notion(applicant_sheet_data)
+                                                                except Exception as e:
+                                                                    print(f'[{label}] Notion即時アップロード失敗: {e}')
                                                 except Exception as e:
                                                     print('Exception when writing mail_history (non-target):', e)
                                             except Exception as e:
@@ -4212,8 +4255,18 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                                     'sent_at': email_received_at,
                                                                 }
                                                                 
-                                                                # 応募者リスト（全員 - 対象外も含む）
-                                                                upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
+                                                                # 2. 応募者リスト（全員 - 対象外も含む）
+                                                                try:
+                                                                    upload_applicant_to_oubosha_list(applicant_sheet_data, uid)
+                                                                except Exception as e:
+                                                                    print(f'[{label}] 応募者リスト即時アップロード失敗（対象外）: {e}')
+                                                                
+                                                                # 3. Notion（全員）
+                                                                if NOTION_UPLOADER_AVAILABLE:
+                                                                    try:
+                                                                        upload_applicant_to_notion(applicant_sheet_data)
+                                                                    except Exception as e:
+                                                                        print(f'[{label}] Notion即時アップロード失敗（対象外）: {e}')
                                                             except Exception as e:
                                                                 print(f'[{label}] 応募者リスト即時アップロード失敗（対象外）: {e}')
                                                 except Exception as e:
