@@ -1,5 +1,5 @@
 {
-  "enabled": true, 
+  "enabled": false, 
   "spreadsheet_id": "1aaoZOp-dTR_axwSVKaeLmv6pKPDPZ5giZeO-RYU_vGI",
   "sheet_name": "応募者リスト",
   "service_account_path": "service-account/service-account",

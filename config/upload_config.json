@@ -1,5 +1,5 @@
 {
-  "enabled": true,
+  "enabled": false,
   "spreadsheet_id": "1T9_xa3Ej-heRZcQrTcTe2x6PINKP_zEz0mT_Rwf4VTI",
   "sheet_name": "管理表",
   "service_account_path": "service-account/service-account",

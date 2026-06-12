@@ -1,0 +1,58 @@
+{
+  "enabled": true,
+  "spreadsheet_id": "1xDFKBb4sRUIdNexcUV7ODG26FhR9kTotKylI2S85bPk",
+  "sheet_name": "管理表",
+  "service_account_path": "service-account/service-account",
+  "csv_encoding": "auto",
+  "encoding_fallbacks": [
+    "utf-8-sig",
+    "shift-jis",
+    "cp932",
+    "utf-8",
+    "iso-2022-jp",
+    "euc-jp"
+  ],
+  "formulas": {
+    "C列(memo3)": "=COUNTIFS($J$3:$J{row},J{row},$I$3:$I{row},I{row})",
+    "B列(memo2)": "=$J{row}&$I{row}&$C{row}",
+    "重複": "=COUNTIF($M:$M,$M{row})"
+  },
+  "column_mapping": {
+    "A列(memo1)": "",
+    "B列(memo2)": "",
+    "C列(memo3)": "",
+    "架電日": "",
+    "CA架電担当": "",
+    "CS備考": "",
+    "メール": "",
+    "LINE": "",
+    "進捗": "",
+    "担当CA": "",
+    "氏名": "名前",
+    "フリガナ": "",
+    "電話番号": "電話番号",
+    "アドレス": "メールアドレス",
+    "生年月日": "",
+    "年齢": "",
+    "性別": "",
+    "学歴": "",
+    "居住地": "応募者の居住地",
+    "転居": "",
+    "転居備考": "勤務地",
+    "応募日": "日付",
+    "面談日": "",
+    "面談時間": "",
+    "流入": "",
+    "応募項目": "職種名",
+    "掲載企業": "",
+    "担当CS": "",
+    "備考": "応募者の質問連のある登録",
+    "重複": ""
+  },
+  "default_values": {
+    "進捗": "",
+    "流入": "indeed"
+  },
+  "skip_duplicates": true,
+  "duplicate_check_column": "アドレス"
+}
