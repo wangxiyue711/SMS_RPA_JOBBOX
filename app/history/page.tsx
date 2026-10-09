@@ -9,6 +9,8 @@ import {
   orderBy,
   limit,
   getDocs,
+  deleteDoc,
+  doc,
 } from "firebase/firestore";
 
 async function waitForAuthReady(timeout = 3000): Promise<any | null> {
@@ -49,6 +51,7 @@ export default function HistoryPage() {
   );
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [platformDropdownOpen, setPlatformDropdownOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     loadHistory();
@@ -93,7 +96,7 @@ export default function HistoryPage() {
         const smsQ = query(smsCollRef, orderBy("sentAt", "desc"));
         const smsSnap = await getDocs(smsQ);
         smsSnap.forEach((d) => {
-          out.push({ id: d.id, ...(d.data() as any) });
+          out.push({ ...(d.data() as any), id: d.id, source: "sms_history" });
         });
       } catch (e) {
         console.warn("Failed to load sms_history:", e);
@@ -118,7 +121,7 @@ export default function HistoryPage() {
                 ? "送信失敗（M）"
                 : `${data.status}（M）`;
           }
-          out.push({ id: d.id, source: "mail_history", ...data });
+          out.push({ ...data, id: d.id, source: "mail_history" });
         });
       } catch (e) {
         console.warn("Failed to load mail_history:", e);
@@ -206,7 +209,9 @@ export default function HistoryPage() {
     }
 
     // 在选择模式下,执行下载
-    const selectedRows = filteredRows.filter((r) => selectedIds.has(r.id));
+    const selectedRows = filteredRows.filter((r) =>
+      selectedIds.has(getRowSelectionId(r)),
+    );
 
     if (selectedRows.length === 0) {
       alert("ダウンロードする項目を選択してください。");
@@ -574,8 +579,12 @@ export default function HistoryPage() {
     URL.revokeObjectURL(url);
   }
 
+  const getRowSelectionId = (row: any) =>
+    `${row.source === "mail_history" ? "mail_history" : "sms_history"}:${row.id}`;
+
   // 切换单个选择
-  const toggleSelect = (id: string) => {
+  const toggleSelect = (row: any) => {
+    const id = getRowSelectionId(row);
     setSelectedIds((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(id)) {
@@ -593,7 +602,7 @@ export default function HistoryPage() {
       page * PAGE_SIZE,
       (page + 1) * PAGE_SIZE,
     );
-    const currentPageIds = currentPageRows.map((r) => r.id);
+    const currentPageIds = currentPageRows.map(getRowSelectionId);
     const allSelected = currentPageIds.every((id) => selectedIds.has(id));
 
     setSelectedIds((prev) => {
@@ -616,7 +625,7 @@ export default function HistoryPage() {
       (page + 1) * PAGE_SIZE,
     );
     if (currentPageRows.length === 0) return false;
-    return currentPageRows.every((r) => selectedIds.has(r.id));
+    return currentPageRows.every((r) => selectedIds.has(getRowSelectionId(r)));
   };
 
   // 取消选择模式
@@ -624,6 +633,83 @@ export default function HistoryPage() {
     setIsSelectMode(false);
     setSelectedIds(new Set());
   };
+
+  async function deleteSelectedRows() {
+    if (!isSelectMode) {
+      setIsSelectMode(true);
+      return;
+    }
+
+    const selectedRows = rows.filter((row) =>
+      selectedIds.has(getRowSelectionId(row)),
+    );
+    if (selectedRows.length === 0) {
+      alert("削除する履歴を選択してください。");
+      return;
+    }
+    if (
+      !window.confirm(
+        `選択した ${selectedRows.length} 件の履歴を削除しますか？この操作は取り消せません。`,
+      )
+    ) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      const user = await waitForAuthReady();
+      if (!user) throw new Error("未ログインです。ログインしてください。");
+      const db = getFirestore();
+      const uid = (user as any).uid;
+      const deletedIds = new Set<string>();
+      const failedIds = new Set<string>();
+
+      for (let i = 0; i < selectedRows.length; i += 20) {
+        const batch = selectedRows.slice(i, i + 20);
+        const results = await Promise.allSettled(
+          batch.map((row) =>
+            deleteDoc(
+              doc(
+                db,
+                "accounts",
+                uid,
+                row.source === "mail_history" ? "mail_history" : "sms_history",
+                row.id,
+              ),
+            ),
+          ),
+        );
+
+        results.forEach((result, index) => {
+          const selectionId = getRowSelectionId(batch[index]);
+          if (result.status === "fulfilled") {
+            deletedIds.add(selectionId);
+          } else {
+            failedIds.add(selectionId);
+            console.error("Failed to delete history:", result.reason);
+          }
+        });
+      }
+
+      setRows((prev) =>
+        prev.filter((row) => !deletedIds.has(getRowSelectionId(row))),
+      );
+      if (failedIds.size > 0) {
+        setSelectedIds(failedIds);
+        alert(
+          `${deletedIds.size} 件を削除しましたが、${failedIds.size} 件の削除に失敗しました。失敗した履歴を確認して再試行してください。`,
+        );
+      } else {
+        cancelSelectMode();
+        alert(`${deletedIds.size} 件の履歴を削除しました。`);
+      }
+    } catch (e) {
+      console.error("delete history error", e);
+      alert("履歴の削除に失敗しました。時間をおいて再試行してください。");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   // 获取送信结果的详细分类值
   const getResultCategory = (r: any): string => {
@@ -1095,15 +1181,32 @@ export default function HistoryPage() {
           <button
             className="btn"
             onClick={loadHistory}
-            disabled={loading}
+            disabled={loading || deleting}
             style={{ width: "auto" }}
           >
             {loading ? "読み込み中..." : "更新"}
           </button>
           <button
+            className="btn"
+            onClick={deleteSelectedRows}
+            disabled={
+              deleting ||
+              filteredRows.length === 0 ||
+              (isSelectMode && selectedIds.size === 0)
+            }
+            style={{ width: "auto" }}
+          >
+            {deleting
+              ? "削除中..."
+              : isSelectMode
+                ? `削除${selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}`
+                : "削除"}
+          </button>
+          <button
             className="btn btn-gray"
             onClick={() => downloadCsv()}
             disabled={
+              deleting ||
               filteredRows.length === 0 ||
               (isSelectMode && selectedIds.size === 0)
             }
@@ -1158,6 +1261,7 @@ export default function HistoryPage() {
             <button
               className="btn"
               onClick={cancelSelectMode}
+              disabled={deleting}
               style={{ width: "auto" }}
             >
               キャンセル
@@ -1200,6 +1304,7 @@ export default function HistoryPage() {
                       type="checkbox"
                       checked={isAllSelected()}
                       onChange={toggleSelectAll}
+                      disabled={deleting}
                       style={{ cursor: "pointer" }}
                     />
                   </th>
@@ -1225,10 +1330,12 @@ export default function HistoryPage() {
                 );
                 return slicedRows.map((r, idx) => (
                   <tr
-                    key={r.id}
+                    key={getRowSelectionId(r)}
                     className={"history-row"}
-                    onClick={() => isSelectMode && toggleSelect(r.id)}
-                    style={{ cursor: isSelectMode ? "pointer" : "default" }}
+                    onClick={() => isSelectMode && !deleting && toggleSelect(r)}
+                    style={{
+                      cursor: isSelectMode && !deleting ? "pointer" : "default",
+                    }}
                   >
                     {isSelectMode && (
                       <td
@@ -1237,8 +1344,9 @@ export default function HistoryPage() {
                       >
                         <input
                           type="checkbox"
-                          checked={selectedIds.has(r.id)}
+                          checked={selectedIds.has(getRowSelectionId(r))}
                           onChange={() => {}}
+                          disabled={deleting}
                           style={{ cursor: "pointer", pointerEvents: "none" }}
                         />
                       </td>
