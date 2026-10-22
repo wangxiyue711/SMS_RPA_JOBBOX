@@ -21,6 +21,8 @@ out/
 __pycache__/
 *.py[cod]
 *$py.class
+.venv/
+.venv-*/
 
 # Byte-compiled / distribution / packaging
 build/
@@ -35,6 +37,7 @@ Thumbs.db
 
 # Local config / secrets
 config/accounts.json
+config/notion_config.json
 
 # Service account secrets (local only)
 service-account/
@@ -48,3 +51,6 @@ src/chrome_profiles/
 # Temp caches under %USERPROFILE%
 %USERPROFILE%/AppData/Local/Temp/
 logs
+.next
+.%USERPROFILE%
+

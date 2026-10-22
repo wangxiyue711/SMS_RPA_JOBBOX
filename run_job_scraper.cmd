@@ -61,11 +61,39 @@ if "%TARGET_KEYWORD%"=="" (
 set TARGET_COUNT=%~3
 if "%TARGET_COUNT%"=="" set /p TARGET_COUNT=取得件数（Enterで既定値）: 
 
+set CHROMEDRIVER_PATH=%~4
+
+set OUTPUT_PATH=%~5
+if "%OUTPUT_PATH%"=="" set /p OUTPUT_PATH=CSV出力パス（空=既定 logs\job_search_*.csv）: 
+
+set APPEND_MODE=%~6
+if "%APPEND_MODE%"=="" set /p APPEND_MODE=既存CSVに追記しますか？(y/N): 
+
+set BROWSER=%~7
+if "%BROWSER%"=="" set /p BROWSER=ブラウザ（chrome/edge、空=chrome）: 
+if "%BROWSER%"=="" set BROWSER=chrome
+
+set BROWSER_OPT=--browser %BROWSER%
+
+set OUTPUT_OPT=
+if not "%OUTPUT_PATH%"=="" set OUTPUT_OPT=--output "%OUTPUT_PATH%"
+
+set APPEND_OPT=
+if /I "%APPEND_MODE%"=="y" set APPEND_OPT=--append
+
 echo.
 if "%TARGET_COUNT%"=="" (
-  call %PYTHON_EXE% scripts\job_site_scraper.py --url "%TARGET_URL%" --keyword "%TARGET_KEYWORD%"
+  if "%CHROMEDRIVER_PATH%"=="" (
+    call %PYTHON_EXE% scripts\job_site_scraper.py --url "%TARGET_URL%" --keyword "%TARGET_KEYWORD%" %BROWSER_OPT% %OUTPUT_OPT% %APPEND_OPT%
+  ) else (
+    call %PYTHON_EXE% scripts\job_site_scraper.py --url "%TARGET_URL%" --keyword "%TARGET_KEYWORD%" %BROWSER_OPT% --driver-path "%CHROMEDRIVER_PATH%" %OUTPUT_OPT% %APPEND_OPT%
+  )
 ) else (
-  call %PYTHON_EXE% scripts\job_site_scraper.py --url "%TARGET_URL%" --keyword "%TARGET_KEYWORD%" --max-results "%TARGET_COUNT%"
+  if "%CHROMEDRIVER_PATH%"=="" (
+    call %PYTHON_EXE% scripts\job_site_scraper.py --url "%TARGET_URL%" --keyword "%TARGET_KEYWORD%" %BROWSER_OPT% --max-results "%TARGET_COUNT%" %OUTPUT_OPT% %APPEND_OPT%
+  ) else (
+    call %PYTHON_EXE% scripts\job_site_scraper.py --url "%TARGET_URL%" --keyword "%TARGET_KEYWORD%" %BROWSER_OPT% --max-results "%TARGET_COUNT%" --driver-path "%CHROMEDRIVER_PATH%" %OUTPUT_OPT% %APPEND_OPT%
+  )
 )
 
 echo.

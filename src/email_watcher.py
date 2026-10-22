@@ -942,6 +942,12 @@ def _detect_name_type(name):
     """
     if not name:
         return 'alpha'
+
+    # Normalize to unify full/half width characters (e.g., ＳＨＯＨＡＧ -> SHOHAG)
+    try:
+        name = unicodedata.normalize('NFKC', str(name))
+    except Exception:
+        pass
     
     # Count different character types
     kanji_count = 0
@@ -3003,6 +3009,11 @@ def watch_mail(imap_host, email_user, email_pass, uid=None, folder='INBOX', poll
                                                 birth = detail.get('birth','') or ''
 
                                                 def detect_name_types(s):
+                                                    # NFKC makes fullwidth Latin letters match ASCII regexes
+                                                    try:
+                                                        s = unicodedata.normalize('NFKC', s or '')
+                                                    except Exception:
+                                                        s = s or ''
                                                     types = set()
                                                     if re.search(r'[\u4E00-\u9FFF]', s): types.add('kanji')
                                                     if re.search(r'[\u30A0-\u30FF]', s): types.add('katakana')

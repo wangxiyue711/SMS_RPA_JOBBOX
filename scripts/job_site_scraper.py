@@ -21,6 +21,8 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, List, Optional
+import requests
+from requests import Session
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -28,6 +30,9 @@ from bs4.element import Tag
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver import Chrome
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.edge.service import Service as EdgeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webelement import WebElement
@@ -36,6 +41,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 
 DEFAULT_TARGET_URL = "https://xn--pckua2a7gp15o89zb.com/93187E31781E495BAB"
+
+DEFAULT_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
+    )
+}
 
 
 SEARCH_INPUT_SELECTORS = [
@@ -167,9 +180,18 @@ def prompt_if_empty(value: Optional[str], label: str) -> str:
 
 
 def normalize_company_type(value: str) -> str:
-    if value == "发布企业":
-        return "掲載企業"
-    return ""
+    normalized = clean_text(value or "")
+    if not normalized:
+        return ""
+    mapping = {
+        # legacy internal markers (Chinese)
+        "发布企业": "掲載企業",
+        "招聘企业": "採用企業",
+        # canonical (Japanese)
+        "掲載企業": "掲載企業",
+        "採用企業": "採用企業",
+    }
+    return mapping.get(normalized, normalized)
 
 
 def normalize_match_text(value: str) -> str:
@@ -206,7 +228,27 @@ def normalize_search_keyword(raw_keyword: str) -> str:
     return " or ".join(parts)
 
 
-def build_driver(headless: bool) -> Chrome:
+def build_driver(headless: bool, driver_path: Optional[str] = None, browser: str = "chrome") -> Chrome:
+    browser = (browser or "chrome").strip().lower()
+
+    if browser == "edge":
+        options = EdgeOptions()
+        options.add_argument("--window-size=1440,1000")
+        if headless:
+            options.add_argument("--headless=new")
+        service = EdgeService(executable_path=driver_path) if driver_path else None
+        try:
+            driver = webdriver.Edge(service=service, options=options)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 4551:
+                print("\n[ERROR] Windows 的应用程序控制策略阻止了 WebDriver (msedgedriver) 启动。")
+                print("- 这是公司电脑的 AppLocker/WDAC 限制，属于系统策略拦截。")
+                print("- 你可以尝试把 msedgedriver.exe 放到公司允许执行的目录（常见：C:\\Program Files\\...），并用 --driver-path 指定。")
+                print("- 如果仍被拦截，需要联系 IT 将 msedgedriver.exe 加入允许列表。\n")
+            raise
+        driver.implicitly_wait(3)
+        return driver
+
     options = webdriver.ChromeOptions()
     options.add_argument("--window-size=1440,1000")
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -214,9 +256,232 @@ def build_driver(headless: bool) -> Chrome:
     options.add_experimental_option("useAutomationExtension", False)
     if headless:
         options.add_argument("--headless=new")
-    driver = webdriver.Chrome(options=options)
+
+    service = Service(executable_path=driver_path) if driver_path else None
+    try:
+        driver = webdriver.Chrome(service=service, options=options)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 4551:
+            print("\n[ERROR] Windows 的应用程序控制策略阻止了 WebDriver (chromedriver) 启动。")
+            print("- 这是公司电脑的 AppLocker/WDAC 限制，属于系统策略拦截（不是 Python/Selenium 代码问题）。")
+            print("- 处理路径通常只有两类：")
+            print("  1) 使用 IT 允许执行的 chromedriver.exe 路径：把 chromedriver.exe 放到白名单目录（常见：C:\\Program Files\\...），并用 --driver-path 指定。")
+            print("  2) 请 IT 放行：按文件哈希/路径/发布者规则允许 chromedriver.exe 运行（或放行 Selenium 需要的 driver 目录）。")
+            print("- 如果你下载后是从浏览器拿到的文件，右键属性里可能有“解除阻止(Unblock)”也要勾选。")
+            print("- 也可以尝试改用 Edge：加 --browser edge（但仍可能需要 IT 放行 msedgedriver）。\n")
+        raise
     driver.implicitly_wait(3)
     return driver
+
+
+def fetch_html(session: Session, url: str, method: str = "GET", params: Optional[dict] = None, data: Optional[dict] = None) -> requests.Response:
+    method = (method or "GET").upper()
+    if method == "POST":
+        response = session.post(url, data=data or {}, params=params, timeout=30)
+    else:
+        response = session.get(url, params=params or {}, timeout=30)
+    response.raise_for_status()
+    return response
+
+
+def find_search_form(page_html: str, base_url: str) -> tuple[str, str, str, dict]:
+    """Find a likely site-search form and return (method, action_url, keyword_field, hidden_fields)."""
+    soup = BeautifulSoup(page_html, "html.parser")
+    candidates: List[tuple[int, Tag]] = []
+    keyword_names = ["q", "kw", "keyword", "keywords"]
+
+    for form in soup.find_all("form"):
+        score = 0
+        if form.get("role") == "search":
+            score += 5
+        inputs = form.find_all(["input", "textarea"])
+        for inp in inputs:
+            name = (inp.get("name") or "").strip().lower()
+            itype = (inp.get("type") or "").strip().lower()
+            placeholder = clean_text(inp.get("placeholder") or "").lower()
+            aria = clean_text(inp.get("aria-label") or "").lower()
+            if name in keyword_names:
+                score += 10
+            if itype == "search":
+                score += 4
+            if any(token in placeholder for token in ["検索", "キーワード", "求人", "仕事"]):
+                score += 3
+            if any(token in aria for token in ["検索", "キーワード", "求人"]):
+                score += 3
+        if score > 0:
+            candidates.append((score, form))
+
+    if not candidates:
+        return "GET", base_url, "q", {}
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    form = candidates[0][1]
+    method = (form.get("method") or "GET").strip().upper()
+    action = (form.get("action") or "").strip()
+    action_url = urljoin(base_url, action) if action else base_url
+
+    keyword_field = "q"
+    best_field_score = -1
+    for inp in form.find_all(["input", "textarea"]):
+        name = (inp.get("name") or "").strip()
+        if not name:
+            continue
+        itype = (inp.get("type") or "").strip().lower()
+        score = 0
+        if name.lower() in keyword_names:
+            score += 10
+        if itype == "search":
+            score += 2
+        if score > best_field_score:
+            best_field_score = score
+            keyword_field = name
+
+    hidden_fields: dict = {}
+    for inp in form.find_all("input"):
+        itype = (inp.get("type") or "").strip().lower()
+        name = (inp.get("name") or "").strip()
+        value = inp.get("value") or ""
+        if itype == "hidden" and name:
+            hidden_fields[name] = value
+
+    return method, action_url, keyword_field, hidden_fields
+
+
+def jobbox_find_next_url(page_html: str, current_url: str) -> Optional[str]:
+    soup = BeautifulSoup(page_html, "html.parser")
+    # Prefer rel=next if present.
+    link = soup.select_one("a[rel='next'][href]")
+    if link and link.get("href"):
+        return urljoin(current_url, link.get("href"))
+
+    for a in soup.find_all("a", href=True):
+        text = clean_text(a.get_text(" ", strip=True))
+        href = a.get("href")
+        if not href:
+            continue
+        if "次のページへ" in text or ("次へ" in text and "前" not in text):
+            return urljoin(current_url, href)
+        if "pg=" in href and "前" not in text:
+            return urljoin(current_url, href)
+    return None
+
+
+def run_jobbox_http_flow(
+    url: str,
+    keyword: str,
+    wait_seconds: int,
+    max_pages: int,
+    max_results: int,
+    skip_mismatched_company: bool,
+) -> List[JobRecord]:
+    session = requests.Session()
+    session.headers.update(DEFAULT_HTTP_HEADERS)
+
+    # 1) Open the page.
+    try:
+        response = fetch_html(session, url)
+        page_html = response.text
+        current_url = response.url
+    except Exception:
+        parsed = urlparse(url)
+        fallback_url = f"{parsed.scheme or 'https'}://{parsed.netloc}/" if parsed.netloc else url
+        response = fetch_html(session, fallback_url)
+        page_html = response.text
+        current_url = response.url
+
+    # 2) Submit search form (best-effort).
+    method, action_url, keyword_field, hidden_fields = find_search_form(page_html, current_url)
+    payload = dict(hidden_fields)
+    payload[keyword_field] = normalize_search_keyword(keyword)
+
+    try:
+        if method == "POST":
+            response = fetch_html(session, action_url, method="POST", data=payload)
+        else:
+            response = fetch_html(session, action_url, method="GET", params=payload)
+        page_html = response.text
+        current_url = response.url
+    except Exception:
+        # If search submission fails, continue with the opened page.
+        pass
+
+    time.sleep(max(wait_seconds, 0))
+
+    records: List[JobRecord] = []
+    pages_done = 0
+    target_count = max(max_results, 0)
+    page_limit = max(max_pages, 0)
+
+    while True:
+        page_records = extract_jobbox_records(page_html, keyword, current_url)
+        if page_records:
+            page_records = enrich_jobbox_records_with_detail_http(
+                session,
+                page_records,
+                wait_seconds=wait_seconds,
+                skip_mismatched_company=skip_mismatched_company,
+            )
+
+        records = merge_records(records, page_records)
+        if target_count:
+            records = limit_records(records, target_count)
+
+        pages_done += 1
+        if target_count and len(records) >= target_count:
+            break
+        if page_limit and pages_done >= page_limit:
+            break
+
+        next_url = jobbox_find_next_url(page_html, current_url)
+        if not next_url:
+            break
+        try:
+            response = fetch_html(session, next_url)
+        except Exception:
+            break
+        page_html = response.text
+        current_url = response.url
+        time.sleep(max(wait_seconds, 0))
+
+    return records
+
+
+def enrich_jobbox_records_with_detail_http(
+    session: Session,
+    records: List[JobRecord],
+    wait_seconds: int,
+    skip_mismatched_company: bool,
+) -> List[JobRecord]:
+    enriched: List[JobRecord] = []
+    for record in records:
+        if not record.source_url:
+            enriched.append(record)
+            continue
+        try:
+            response = fetch_html(session, record.source_url)
+            html = response.text
+            time.sleep(max(wait_seconds, 0))
+
+            recruiter_name, _ = parse_jobbox_detail_recruiter(html, record.title)
+            publisher_name, _ = parse_jobbox_detail_company(html)
+
+            if skip_mismatched_company and recruiter_name and publisher_name:
+                normalized_recruiter = normalize_company_for_compare(recruiter_name)
+                normalized_publisher = normalize_company_for_compare(publisher_name)
+                if normalized_recruiter and normalized_publisher and normalized_recruiter != normalized_publisher:
+                    continue
+
+            if recruiter_name:
+                record.company_name = recruiter_name
+                record.company_type = normalize_company_type("採用企業")
+            elif publisher_name and not record.company_name:
+                record.company_name = publisher_name
+                record.company_type = normalize_company_type("掲載企業")
+        except Exception:
+            enriched.append(record)
+            continue
+        enriched.append(record)
+    return enriched
 
 
 def wait_ready(driver: Chrome, timeout: int = 20) -> None:
@@ -378,28 +643,28 @@ def extract_company(container: Tag) -> tuple[str, str]:
         if not text:
             continue
         if "publisher" in selector or "掲載" in text or "投稿" in text:
-            return text, "发布企业"
-        return text, "招聘企业"
+            return text, "掲載企業"
+        return text, "採用企業"
 
     recruiter = extract_label_value(container, RECRUITER_LABELS)
     if recruiter:
-        return recruiter, "招聘企业"
+        return recruiter, "採用企業"
 
     publisher = extract_label_value(container, PUBLISHER_LABELS)
     if publisher:
-        return publisher, "发布企业"
+        return publisher, "掲載企業"
 
     text = clean_text(container.get_text(" ", strip=True))
     for label in RECRUITER_LABELS:
         if label in text:
             remainder = clean_text(text.split(label, 1)[-1].lstrip(":："))
             if remainder:
-                return remainder.split(" ")[0], "招聘企业"
+                return remainder.split(" ")[0], "採用企業"
     for label in PUBLISHER_LABELS:
         if label in text:
             remainder = clean_text(text.split(label, 1)[-1].lstrip(":："))
             if remainder:
-                return remainder.split(" ")[0], "发布企业"
+                return remainder.split(" ")[0], "掲載企業"
     return "", ""
 
 
@@ -471,18 +736,18 @@ def extract_jobbox_company_from_lines(lines: List[str], title: str) -> tuple[str
         if clean_text(line) == clean_text(title):
             continue
         if line.startswith("掲載元"):
-            return line.replace("掲載元", "").lstrip(":： "), "发布企业"
+            return line.replace("掲載元", "").lstrip(":： "), "掲載企業"
         if line.startswith("掲載企業"):
-            return line.replace("掲載企業", "").lstrip(":： "), "发布企业"
+            return line.replace("掲載企業", "").lstrip(":： "), "掲載企業"
         if looks_like_jobbox_metadata(line):
             continue
         if seems_company_text(line):
-            return line, "招聘企业"
+            return line, "採用企業"
 
     for line in lines[:12]:
         for label in PUBLISHER_LABELS:
             if line.startswith(label):
-                return line.replace(label, "", 1).lstrip(":： "), "发布企业"
+                return line.replace(label, "", 1).lstrip(":： "), "掲載企業"
     return "", ""
 
 
@@ -531,40 +796,74 @@ def parse_jobbox_detail_recruiter(page_html: str, job_title: str) -> tuple[str, 
             if normalize_match_text(normalized_candidate) == normalized_title:
                 continue
             if seems_detail_company_text(normalized_candidate):
-                return normalized_candidate, ""
+                return normalized_candidate, "採用企業"
 
     page_title = clean_text(soup.title.get_text(" ", strip=True)) if soup.title else ""
     normalized_page_title = normalize_match_text(page_title)
     if page_title and normalized_title and normalized_title in normalized_page_title:
         candidate = clean_text(page_title[: normalized_page_title.index(normalized_title)].rstrip("-｜|"))
         if candidate and seems_detail_company_text(candidate):
-            return candidate, ""
+            return candidate, "採用企業"
 
     return "", ""
 
 
-def should_lookup_detail_company(record: JobRecord) -> bool:
-    return not record.company_name and bool(record.source_url)
+def normalize_company_for_compare(value: str) -> str:
+    """Normalize company-ish strings for recruiter/publisher comparison."""
+    text = clean_text(unicodedata.normalize("NFKC", value or ""))
+    if not text:
+        return ""
+    # Drop bracketed/parenthesized suffixes (dept names etc.).
+    text = re.sub(r"[（(\[【].*?[）)\]】]", "", text)
+    text = clean_text(text)
+    # If there is a whitespace-delimited department suffix, keep the first token.
+    if " " in text:
+        text = text.split(" ", 1)[0]
+    return clean_text(text.rstrip("-|｜|"))
 
 
-def enrich_jobbox_records_with_detail(driver: Chrome, records: List[JobRecord], wait_seconds: int) -> List[JobRecord]:
+def enrich_jobbox_records_with_detail(
+    driver: Chrome,
+    records: List[JobRecord],
+    wait_seconds: int,
+    skip_mismatched_company: bool,
+) -> List[JobRecord]:
+    enriched: List[JobRecord] = []
+
     for record in records:
-        if not should_lookup_detail_company(record):
+        if not record.source_url:
+            enriched.append(record)
             continue
+
         try:
             driver.get(record.source_url)
             wait_ready(driver, timeout=20)
             time.sleep(max(wait_seconds, 0))
-            company_name, company_type = parse_jobbox_detail_recruiter(driver.page_source, record.title)
-            if not company_name:
-                company_name, company_type = parse_jobbox_detail_company(driver.page_source)
-            # 一覧で取得した求人企業を詳細ページの掲載企業で上書きしない。
-            if company_name and not record.company_name:
-                record.company_name = company_name
-                record.company_type = company_type
+
+            recruiter_name, _ = parse_jobbox_detail_recruiter(driver.page_source, record.title)
+            publisher_name, _ = parse_jobbox_detail_company(driver.page_source)
+
+            if skip_mismatched_company and recruiter_name and publisher_name:
+                normalized_recruiter = normalize_company_for_compare(recruiter_name)
+                normalized_publisher = normalize_company_for_compare(publisher_name)
+                if normalized_recruiter and normalized_publisher and normalized_recruiter != normalized_publisher:
+                    continue
+
+            # Prefer recruiter name when available; otherwise keep existing/list value.
+            if recruiter_name:
+                record.company_name = recruiter_name
+                record.company_type = normalize_company_type("採用企業")
+            elif publisher_name and not record.company_name:
+                record.company_name = publisher_name
+                record.company_type = normalize_company_type("掲載企業")
+
         except Exception:
+            enriched.append(record)
             continue
-    return records
+
+        enriched.append(record)
+
+    return enriched
 
 
 def extract_jobbox_records(page_html: str, keyword: str, source_url: str) -> List[JobRecord]:
@@ -589,7 +888,7 @@ def extract_jobbox_records(page_html: str, keyword: str, source_url: str) -> Lis
 
         if title_company:
             company_name = title_company
-            company_type = ""
+            company_type = "採用企業"
         else:
             company_name, company_type = extract_jobbox_company_from_lines(following_lines, normalized_title)
 
@@ -748,14 +1047,24 @@ def print_record(index: int, record: JobRecord) -> None:
     print(f"{index}. キーワード={record.keyword} | タイトル={record.title} | 企業名={record.company_name}{suffix}", flush=True)
 
 
-def write_csv(records: List[JobRecord], output_path: str) -> None:
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w", newline="", encoding="utf-8-sig") as handle:
+def write_csv(records: List[JobRecord], output_path: str, append: bool = False) -> None:
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    file_exists = os.path.exists(output_path)
+    mode = "a" if append else "w"
+    should_write_header = True
+    if append and file_exists and os.path.getsize(output_path) > 0:
+        should_write_header = False
+
+    with open(output_path, mode, newline="", encoding="utf-8-sig") as handle:
         writer = csv.DictWriter(
             handle,
             fieldnames=["キーワード", "タイトル", "企業名", "企業種別", "URL"],
         )
-        writer.writeheader()
+        if should_write_header:
+            writer.writeheader()
         for record in records:
             writer.writerow(
                 {
@@ -776,6 +1085,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-pages", type=int, default=0, help="取得する最大ページ数（0 は無制限）")
     parser.add_argument("--max-results", type=int, default=0, help="取得する最大件数（0 は無制限）")
     parser.add_argument("--headless", action="store_true", help="ヘッドレスモードを使用する")
+    parser.add_argument(
+        "--driver-path",
+        help="使用する chromedriver.exe のフルパス（Windows の実行制御ポリシー対策）",
+    )
+    parser.add_argument(
+        "--browser",
+        choices=["chrome", "edge"],
+        default="chrome",
+        help="起動するブラウザ（既定: chrome）。会社PCでchromedriverがブロックされる場合は edge を試す。",
+    )
+    parser.add_argument(
+        "--output",
+        help="CSV 出力パス（ディレクトリ指定も可）。未指定時は logs/job_search_YYYYmmdd_HHMMSS.csv",
+    )
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="--output で指定した CSV が存在する場合に追記する（ヘッダは自動判定）",
+    )
+    parser.add_argument(
+        "--keep-mismatched-company",
+        action="store_true",
+        help="求人ボックスで採用企業と掲載企業が異なる場合も結果に残す（既定はスキップ）",
+    )
     return parser.parse_args()
 
 
@@ -789,9 +1122,59 @@ def main() -> int:
 
     keyword = normalize_search_keyword(keyword)
 
-    driver = build_driver(headless=args.headless)
-    detail_driver = build_driver(headless=True) if is_jobbox_url(url) else None
+    driver: Optional[Chrome] = None
+    detail_driver: Optional[Chrome] = None
     try:
+        try:
+            driver = build_driver(headless=args.headless, driver_path=args.driver_path, browser=args.browser)
+            detail_driver = (
+                build_driver(headless=True, driver_path=args.driver_path, browser=args.browser)
+                if is_jobbox_url(url)
+                else None
+            )
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 4551 and is_jobbox_url(url):
+                print("\n[WARN] WebDriver 被策略拦截，已切换为 JobBox 纯 HTTP 抓取模式（不需要 chromedriver）。")
+                records = run_jobbox_http_flow(
+                    url=url,
+                    keyword=keyword,
+                    wait_seconds=args.wait_seconds,
+                    max_pages=args.max_pages,
+                    max_results=args.max_results,
+                    skip_mismatched_company=not bool(args.keep_mismatched_company),
+                )
+
+                if records:
+                    print_records(records)
+                else:
+                    print_records(records)
+
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                raw_output = args.output.strip() if args.output else ""
+                if raw_output:
+                    abs_output = os.path.abspath(raw_output)
+                    if os.path.isdir(abs_output) or raw_output.endswith(("/", "\\")):
+                        output_path = os.path.join(abs_output, f"job_search_{timestamp}.csv")
+                    else:
+                        output_path = abs_output
+                else:
+                    output_path = os.path.abspath(
+                        os.path.join(
+                            os.path.dirname(__file__),
+                            "..",
+                            "logs",
+                            f"job_search_{timestamp}.csv",
+                        )
+                    )
+
+                write_csv(records, output_path, append=bool(args.append))
+                print(f"\nCSV を出力しました: {output_path}")
+
+                if not records:
+                    print("\n対象サイトが分かれば、専用セレクタに寄せて精度をさらに上げられます。")
+                return 0
+            raise
+
         print(f"ページを開いています: {url}")
         driver.get(url)
         wait_ready(driver, timeout=20)
@@ -823,7 +1206,12 @@ def main() -> int:
             current_url = driver.current_url
             page_records = extract_records(page_html, keyword, current_url)
             if page_records and detail_driver and is_jobbox_url(current_url):
-                page_records = enrich_jobbox_records_with_detail(detail_driver, page_records, args.wait_seconds)
+                page_records = enrich_jobbox_records_with_detail(
+                    detail_driver,
+                    page_records,
+                    args.wait_seconds,
+                    skip_mismatched_company=not bool(args.keep_mismatched_company),
+                )
 
             merged_records = merge_records(records, page_records)
             if target_count:
@@ -853,20 +1241,36 @@ def main() -> int:
             print_records(records)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "logs",
-            f"job_search_{timestamp}.csv",
-        )
-        write_csv(records, os.path.abspath(output_path))
-        print(f"\nCSV を出力しました: {os.path.abspath(output_path)}")
+        if args.output:
+            raw_output = args.output.strip()
+        else:
+            raw_output = ""
+
+        if raw_output:
+            abs_output = os.path.abspath(raw_output)
+            if os.path.isdir(abs_output) or raw_output.endswith(("/", "\\")):
+                output_path = os.path.join(abs_output, f"job_search_{timestamp}.csv")
+            else:
+                output_path = abs_output
+        else:
+            output_path = os.path.abspath(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "logs",
+                    f"job_search_{timestamp}.csv",
+                )
+            )
+
+        write_csv(records, output_path, append=bool(args.append))
+        print(f"\nCSV を出力しました: {output_path}")
 
         if not records:
             print("\n対象サイトが分かれば、専用セレクタに寄せて精度をさらに上げられます。")
         return 0
     finally:
-        driver.quit()
+        if driver:
+            driver.quit()
         if detail_driver:
             detail_driver.quit()
 
