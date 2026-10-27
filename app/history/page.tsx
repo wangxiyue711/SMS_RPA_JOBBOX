@@ -202,39 +202,59 @@ export default function HistoryPage() {
   }
 
   function getHistoryAge(row: any): string {
+    const rawBirth = row.birth || row.birthdate || "";
+    const parsedBirth = extractBirthAndAge(rawBirth);
+    const birthMatch = parsedBirth.birth.match(
+      /^(\d{4})(?:年|[/-])(\d{1,2})(?:月|[/-])(\d{1,2})日?$/,
+    );
+    if (birthMatch) {
+      const year = Number(birthMatch[1]);
+      const month = Number(birthMatch[2]);
+      const day = Number(birthMatch[3]);
+      const birthDate = new Date(year, month - 1, day);
+      if (
+        birthDate.getFullYear() === year &&
+        birthDate.getMonth() === month - 1 &&
+        birthDate.getDate() === day
+      ) {
+        const today = new Date();
+        let age = today.getFullYear() - year;
+        if (
+          today.getMonth() < month - 1 ||
+          (today.getMonth() === month - 1 && today.getDate() < day)
+        ) {
+          age -= 1;
+        }
+        return age >= 0 ? String(age) : "";
+      }
+    }
+
+    if (parsedBirth.age) return parsedBirth.age;
     if (row.age !== undefined && row.age !== null && String(row.age).trim()) {
       return String(row.age).trim();
     }
-    const rawBirth = row.birth || row.birthdate || "";
-    const parsedBirth = extractBirthAndAge(rawBirth);
-    if (parsedBirth.age) return parsedBirth.age;
+    return "";
+  }
 
-    const match = parsedBirth.birth.match(
+  function formatHistoryBirthDate(raw: any): string {
+    const birth = extractBirthAndAge(raw).birth;
+    const match = birth.match(
       /^(\d{4})(?:年|[/-])(\d{1,2})(?:月|[/-])(\d{1,2})日?$/,
     );
-    if (!match) return "";
+    if (!match) return birth;
 
     const year = Number(match[1]);
     const month = Number(match[2]);
     const day = Number(match[3]);
-    const birthDate = new Date(year, month - 1, day);
+    const date = new Date(year, month - 1, day);
     if (
-      birthDate.getFullYear() !== year ||
-      birthDate.getMonth() !== month - 1 ||
-      birthDate.getDate() !== day
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day
     ) {
-      return "";
+      return birth;
     }
-
-    const today = new Date();
-    let age = today.getFullYear() - year;
-    if (
-      today.getMonth() < month - 1 ||
-      (today.getMonth() === month - 1 && today.getDate() < day)
-    ) {
-      age -= 1;
-    }
-    return age >= 0 ? String(age) : "";
+    return `${year}年${month}月${day}日`;
   }
 
   function downloadCsv() {
@@ -1423,11 +1443,8 @@ export default function HistoryPage() {
                     </td>
                     <td className="history-cell">{r.gender || "-"}</td>
                     <td className="history-cell">
-                      {(() => {
-                        const raw = r.birth || r.birthdate || "";
-                        const bp = extractBirthAndAge(raw);
-                        return bp.birth || "-";
-                      })()}
+                      {formatHistoryBirthDate(r.birth || r.birthdate || "") ||
+                        "-"}
                     </td>
                     <td className="history-cell">
                       {getHistoryAge(r) || "-"}
