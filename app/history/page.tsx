@@ -1243,22 +1243,6 @@ export default function HistoryPage() {
             {loading ? "読み込み中..." : "更新"}
           </button>
           <button
-            className="btn"
-            onClick={deleteSelectedRows}
-            disabled={
-              deleting ||
-              filteredRows.length === 0 ||
-              (isSelectMode && selectedIds.size === 0)
-            }
-            style={{ width: "auto" }}
-          >
-            {deleting
-              ? "削除中..."
-              : isSelectMode
-                ? `削除${selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}`
-                : "削除"}
-          </button>
-          <button
             className="btn btn-gray"
             onClick={() => downloadCsv()}
             disabled={
@@ -1312,6 +1296,22 @@ export default function HistoryPage() {
                   }`
                 : "CSV出力"}
             </span>
+          </button>
+          <button
+            className="btn"
+            onClick={deleteSelectedRows}
+            disabled={
+                deleting ||
+                filteredRows.length === 0 ||
+                (isSelectMode && selectedIds.size === 0)
+            }
+            style={{ width: "auto", backgroundColor: "#8b0000", color: "#fff" }}
+          >
+            {deleting
+                ? "削除中..."
+                : isSelectMode
+                  ? `削除${selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}`
+                  : "削除"}
           </button>
           {isSelectMode && (
             <button
