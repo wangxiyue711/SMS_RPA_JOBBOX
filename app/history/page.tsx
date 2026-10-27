@@ -201,6 +201,42 @@ export default function HistoryPage() {
     }
   }
 
+  function getHistoryAge(row: any): string {
+    if (row.age !== undefined && row.age !== null && String(row.age).trim()) {
+      return String(row.age).trim();
+    }
+    const rawBirth = row.birth || row.birthdate || "";
+    const parsedBirth = extractBirthAndAge(rawBirth);
+    if (parsedBirth.age) return parsedBirth.age;
+
+    const match = parsedBirth.birth.match(
+      /^(\d{4})(?:年|[/-])(\d{1,2})(?:月|[/-])(\d{1,2})日?$/,
+    );
+    if (!match) return "";
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const birthDate = new Date(year, month - 1, day);
+    if (
+      birthDate.getFullYear() !== year ||
+      birthDate.getMonth() !== month - 1 ||
+      birthDate.getDate() !== day
+    ) {
+      return "";
+    }
+
+    const today = new Date();
+    let age = today.getFullYear() - year;
+    if (
+      today.getMonth() < month - 1 ||
+      (today.getMonth() === month - 1 && today.getDate() < day)
+    ) {
+      age -= 1;
+    }
+    return age >= 0 ? String(age) : "";
+  }
+
   function downloadCsv() {
     // 如果不在选择模式,进入选择模式
     if (!isSelectMode) {
@@ -266,7 +302,7 @@ export default function HistoryPage() {
       const birthRaw = r.birth || r.birthdate || "";
       const birthPair = extractBirthAndAge(birthRaw);
       const birth = birthPair.birth;
-      const age = birthPair.age;
+      const age = getHistoryAge(r);
       const email = r.email || "";
       // 电话号码添加制表符前缀，防止Excel删除前导0
       const telRaw = r.tel || r.phone || r.mobilenumber || "";
@@ -1394,11 +1430,7 @@ export default function HistoryPage() {
                       })()}
                     </td>
                     <td className="history-cell">
-                      {(() => {
-                        const raw = r.birth || r.birthdate || "";
-                        const bp = extractBirthAndAge(raw);
-                        return bp.age || "-";
-                      })()}
+                      {getHistoryAge(r) || "-"}
                     </td>
                     <td className="history-cell">{r.email || "-"}</td>
                     <td className="history-cell">
